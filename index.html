@@ -740,12 +740,21 @@
       logLine("[Contacts] Err loading contacts: "+netMsg(e),"err");
     });
   }
+  function parseUnread(c) {
+    if (!c) return 0;
+    var val = c.unreadCount !== undefined ? c.unreadCount : c.unread;
+    if (val === true) return 1;
+    if (val === false || val === null || val === undefined) return 0;
+    var num = parseInt(val, 10);
+    return isNaN(num) ? 0 : num;
+  }
   function loadChats(){
     api("POST","/chat/findChats/"+encodeURIComponent(cfg.inst),{}).then(function(d){
       var arr=Array.isArray(d)?d:(d&&(d.records||d.chats))||[];
       arr.forEach(function(c){
-        if(c.unreadCount > 0){
-          logLine("[Unread Debug] JID: " + (c.remoteJid||c.id) + " | unreadCount: " + c.unreadCount, "info");
+        var uCount = parseUnread(c);
+        if(uCount > 0){
+          logLine("[Unread Debug] JID: " + (c.remoteJid||c.id) + " | unreadCount: " + uCount, "info");
         }
       });
       var map={};
@@ -753,12 +762,13 @@
       arr.forEach(function(c){
         var jid=c.remoteJid||c.id;
         if(!jid)return;
+        var uVal = parseUnread(c);
         if(isGroupJid(jid)){
           var name=(c.name||c.pushName||"").trim();
           var pic=c.profilePicUrl||c.profilePictureUrl||null;
           var updatedAt=c.updatedAt?Date.parse(c.updatedAt):(c.lastMessage&&c.lastMessage.messageTimestamp?tsMs(c.lastMessage.messageTimestamp):0);
           var last=c.lastMessage?msgText(c.lastMessage):"";
-          parsedChatGroups.push({jid:jid,name:name||"Group",pic:pic,updatedAt:updatedAt,last:last,unread:c.unreadCount||c.unread||0});
+          parsedChatGroups.push({jid:jid,name:name||"Group",pic:pic,updatedAt:updatedAt,last:last,unread:uVal});
           return;
         }
         
@@ -795,13 +805,13 @@
         var last=c.lastMessage?msgText(c.lastMessage):"";
         
         if(!map[num]){
-          map[num]={jid:jid,lid:lid,name:name||null,pic:pic,updatedAt:updatedAt,last:last,unread:c.unreadCount||c.unread||0,_raw:c};
+          map[num]={jid:jid,lid:lid,name:name||null,pic:pic,updatedAt:updatedAt,last:last,unread:uVal,_raw:c};
         }else{
           if(!map[num].name&&name)map[num].name=name;
           if(!map[num].pic&&pic)map[num].pic=pic;
           if(lid)map[num].lid=lid;
           if(!jid.includes("@lid"))map[num].jid=jid;
-          map[num].unread=c.unreadCount||c.unread||map[num].unread||0;
+          map[num].unread=Math.max(map[num].unread||0,uVal);
           if(updatedAt>map[num].updatedAt){
             map[num].updatedAt=updatedAt;
             if(last)map[num].last=last;
@@ -922,7 +932,7 @@
         if(g.pic)map[g.jid].pic=g.pic;
         if(g.updatedAt>0)map[g.jid].updatedAt=g.updatedAt;
         if(g.last)map[g.jid].last=g.last;
-        map[g.jid].unread=g.unread||map[g.jid].unread||0;
+        map[g.jid].unread=Math.max(map[g.jid].unread||0, parseUnread(g));
       }
     });
     groups=Object.keys(map).map(function(k){return map[k];})
@@ -1003,6 +1013,9 @@
     $("cv-blank").classList.add("hidden");$("cv-main").classList.remove("hidden");
     $("convo").classList.add("open");$("msg-list").classList.add("hide");
     api("POST","/chat/markChatAsRead/"+encodeURIComponent(cfg.inst),{jid:c.jid}).catch(function(e){});
+    if(c.lid){
+      api("POST","/chat/markChatAsRead/"+encodeURIComponent(cfg.inst),{jid:c.lid}).catch(function(e){});
+    }
     $("cv-name").textContent=c.name;
     var chatCats = chatCategories[c.jid] || [];
     var subtHtml = isGroupJid(c.jid) ? "group" : jidNum(c.jid);
