@@ -186,7 +186,10 @@
   .ci-top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
   .ci-name{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ci-time{font-size:11px;color:var(--faint);flex:none;font-family:var(--font-mono)}
-  .ci-sub{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+  .ci-sub-row{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;margin-top:1px}
+  .ci-sub{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;margin-top:0}
+  .ci-unread{background:var(--signal);color:#fff;font-size:11px;font-weight:600;min-width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;padding:0 4px;box-sizing:border-box;flex:none}
+  .ci-time.highlight{color:var(--signal);font-weight:600}
   .ml-empty,.ml-loading{padding:30px 18px;text-align:center;color:var(--faint);font-size:13px}
 
   .convo{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--paper)}
@@ -750,7 +753,7 @@
           var pic=c.profilePicUrl||c.profilePictureUrl||null;
           var updatedAt=c.updatedAt?Date.parse(c.updatedAt):0;
           var last=c.lastMessage?msgText(c.lastMessage):"";
-          parsedChatGroups.push({jid:jid,name:name||"Group",pic:pic,updatedAt:updatedAt,last:last});
+          parsedChatGroups.push({jid:jid,name:name||"Group",pic:pic,updatedAt:updatedAt,last:last,unread:c.unreadCount||c.unread||0});
           return;
         }
         
@@ -787,12 +790,13 @@
         var last=c.lastMessage?msgText(c.lastMessage):"";
         
         if(!map[num]){
-          map[num]={jid:jid,lid:lid,name:name||null,pic:pic,updatedAt:updatedAt,last:last,_raw:c};
+          map[num]={jid:jid,lid:lid,name:name||null,pic:pic,updatedAt:updatedAt,last:last,unread:c.unreadCount||c.unread||0,_raw:c};
         }else{
           if(!map[num].name&&name)map[num].name=name;
           if(!map[num].pic&&pic)map[num].pic=pic;
           if(lid)map[num].lid=lid;
           if(!jid.includes("@lid"))map[num].jid=jid;
+          map[num].unread=c.unreadCount||c.unread||map[num].unread||0;
           if(updatedAt>map[num].updatedAt){
             map[num].updatedAt=updatedAt;
             if(last)map[num].last=last;
@@ -913,6 +917,7 @@
         if(g.pic)map[g.jid].pic=g.pic;
         if(g.updatedAt>0)map[g.jid].updatedAt=g.updatedAt;
         if(g.last)map[g.jid].last=g.last;
+        map[g.jid].unread=g.unread||map[g.jid].unread||0;
       }
     });
     groups=Object.keys(map).map(function(k){return map[k];})
@@ -927,7 +932,7 @@
       var arr=Array.isArray(d)?d:(d&&(d.groups||d.records))||[];
       apiGroups=arr.map(function(g){
         return {jid:g.id,name:g.subject||"Group",pic:g.pictureUrl||null,
-          updatedAt:0,last:(g.size!=null?(g.size+" members"):"")};
+          updatedAt:0,last:(g.size!=null?(g.size+" members"):""),unread:0};
       });
       combineGroups();
     }).catch(function(e){
@@ -975,7 +980,13 @@
       var av=el("div","avatar");avatarEl(av,c.name,c.pic);
       var body=el("div","ci-body");
       var time=c.updatedAt?new Date(c.updatedAt):null;
-      body.innerHTML='<div class="ci-top"><span class="ci-name">'+esc(c.name)+'</span><span class="ci-time">'+(time?pad(time.getHours())+":"+pad(time.getMinutes()):"")+'</span></div><div class="ci-sub">'+esc(c.last||jidNum(c.jid))+'</div>';
+      var unreadHtml = '';
+      var timeClass = 'ci-time';
+      if(c.unread > 0 && !(active && active.jid === c.jid)){
+        unreadHtml = '<span class="ci-unread">' + c.unread + '</span>';
+        timeClass += ' highlight';
+      }
+      body.innerHTML='<div class="ci-top"><span class="ci-name">'+esc(c.name)+'</span><span class="'+timeClass+'">'+(time?pad(time.getHours())+":"+pad(time.getMinutes()):"")+'</span></div><div class="ci-sub-row"><div class="ci-sub">'+esc(c.last||jidNum(c.jid))+'</div>'+unreadHtml+'</div>';
       it.appendChild(av);it.appendChild(body);
       it.onclick=function(){openChat(c);};
       box.appendChild(it);
@@ -983,8 +994,10 @@
   }
   function openChat(c){
     active=c;
+    c.unread=0;
     $("cv-blank").classList.add("hidden");$("cv-main").classList.remove("hidden");
     $("convo").classList.add("open");$("msg-list").classList.add("hide");
+    api("POST","/chat/markChatAsRead/"+encodeURIComponent(cfg.inst),{jid:c.jid}).catch(function(e){});
     $("cv-name").textContent=c.name;
     var chatCats = chatCategories[c.jid] || [];
     var subtHtml = isGroupJid(c.jid) ? "group" : jidNum(c.jid);
