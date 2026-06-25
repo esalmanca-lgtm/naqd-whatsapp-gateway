@@ -964,7 +964,7 @@
     }
     if(!searchTerm)return src;
     var q=searchTerm.toLowerCase();
-    return src.filter(function(c){return (c.name||"").toLowerCase().indexOf(q)>-1||c.jid.indexOf(q)>-1;});
+    return src.filter(function(c){return (c.name||"").toLowerCase().indexOf(q)>-1||c.jid.indexOf(q)>-1||(c.lid&&c.lid.indexOf(q)>-1);});
   }
   function renderChatList(){
     var box=$("chat-list"),list=currentList();box.innerHTML="";
