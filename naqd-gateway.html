@@ -630,26 +630,38 @@
         var jid=c.remoteJid||c.id;
         if(!jid||isGroupJid(jid))return;
         
-        // TEMPORARY DEBUG LOG
-        var nm=(c.pushName||c.name||"").toLowerCase();
-        if(nm.indexOf("salman")>-1 || nm.indexOf("mufeed")>-1 || jid.indexOf("24486208")>-1 || jid.indexOf("230283")>-1 || jid.indexOf("919380525")>-1 || jid.indexOf("91974698")>-1){
-          logLine("DEBUG [" + jid + "]: " + JSON.stringify(c));
-        }
-
         var num=jidNum(jid);
+        var lid=null;
+        
+        // Handle LID mapping
+        if(jid.includes("@lid")){
+          lid=jid;
+          var alt=c.lastMessage&&c.lastMessage.key&&c.lastMessage.key.remoteJidAlt;
+          if(alt){
+            num=jidNum(alt);
+            jid=alt;
+          }
+        }else{
+          var alt=c.lastMessage&&c.lastMessage.key&&c.lastMessage.key.remoteJidAlt;
+          if(alt&&alt.includes("@lid")){
+            lid=alt;
+          }
+        }
+        
         var name=(c.pushName||c.name||"").trim();
         if(name&&/^\+?[0-9\s\-]{7,}$/.test(name))name="";
         var pic=c.profilePicUrl||c.profilePictureUrl||null;
         var updatedAt=c.updatedAt?Date.parse(c.updatedAt):0;
         var last=c.lastMessage?msgText(c.lastMessage):"";
+        
         if(!map[num]){
-          map[num]={jid:jid,name:name||null,pic:pic,updatedAt:updatedAt,last:last,_raw:c};
+          map[num]={jid:jid,lid:lid,name:name||null,pic:pic,updatedAt:updatedAt,last:last,_raw:c};
         }else{
           if(!map[num].name&&name)map[num].name=name;
           if(!map[num].pic&&pic)map[num].pic=pic;
-          var currentJid=map[num].jid||"";
-          if(updatedAt>map[num].updatedAt||(!currentJid.includes("@")&&jid.includes("@"))){
-            map[num].jid=jid;
+          if(lid)map[num].lid=lid;
+          if(!jid.includes("@lid"))map[num].jid=jid;
+          if(updatedAt>map[num].updatedAt){
             map[num].updatedAt=updatedAt;
             if(last)map[num].last=last;
             map[num]._raw=c;
@@ -703,24 +715,55 @@
     $("cv-blank").classList.add("hidden");$("cv-main").classList.remove("hidden");
     $("convo").classList.add("open");$("msg-list").classList.add("hide");
     $("cv-name").textContent=c.name;
-    $("cv-subt").textContent=JSON.stringify(c._raw||c);
+    $("cv-subt").textContent=isGroupJid(c.jid)?"group":jidNum(c.jid);
     avatarEl($("cv-avatar"),c.name,c.pic);
     renderChatList();
     $("cv-scroll").innerHTML='<div class="ml-loading">Loading messages…</div>';
-    loadMessages(c.jid,true);
+    loadMessages(c,true);
     if(convoPoll)clearInterval(convoPoll);
-    convoPoll=setInterval(function(){if(!document.hidden&&view==="messages"&&active&&active.jid===c.jid)loadMessages(c.jid,false);},9000);
+    convoPoll=setInterval(function(){if(!document.hidden&&view==="messages"&&active&&active.jid===c.jid)loadMessages(active,false);},9000);
   }
-  function loadMessages(jid,scroll){
-    api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:jid}},page:1,offset:60})
-    .then(function(d){
-      var recs=d&&(d.messages&&d.messages.records?d.messages.records:(d.records||d));
-      if(!Array.isArray(recs))recs=[];
-      // client-side safety filter (server filter unreliable on some builds)
-      recs=recs.filter(function(m){return m&&m.key&&m.key.remoteJid===jid;});
-      recs.sort(function(a,b){return tsMs(a.messageTimestamp)-tsMs(b.messageTimestamp);});
-      msgCache[jid]=recs;
-      if(active&&active.jid===jid)renderMessages(recs,scroll);
+  function loadMessages(target,scroll){
+    var jid, lid=null;
+    if(typeof target==="string"){
+      jid=target;
+      var found=chats.filter(function(x){return x.jid===jid;})[0];
+      if(found)lid=found.lid;
+    }else{
+      jid=target.jid;
+      lid=target.lid;
+    }
+    
+    var p1=api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:jid}},page:1,offset:60});
+    var p2=lid?api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:lid}},page:1,offset:60}):Promise.resolve([]);
+    
+    Promise.all([p1,p2]).then(function(results){
+      var d1=results[0], d2=results[1];
+      var recs1=d1&&(d1.messages&&d1.messages.records?d1.messages.records:(d1.records||d1));
+      if(!Array.isArray(recs1))recs1=[];
+      recs1=recs1.filter(function(m){return m&&m.key&&m.key.remoteJid===jid;});
+      
+      var recs2=[];
+      if(lid){
+        recs2=d2&&(d2.messages&&d2.messages.records?d2.messages.records:(d2.records||d2));
+        if(!Array.isArray(recs2))recs2=[];
+        recs2=recs2.filter(function(m){return m&&m.key&&m.key.remoteJid===lid;});
+      }
+      
+      var recs=recs1.concat(recs2);
+      var msgMap={};
+      var uniqueRecs=[];
+      recs.forEach(function(m){
+        var mid=m.key&&m.key.id;
+        if(mid&&!msgMap[mid]){
+          msgMap[mid]=true;
+          uniqueRecs.push(m);
+        }
+      });
+      
+      uniqueRecs.sort(function(a,b){return tsMs(a.messageTimestamp)-tsMs(b.messageTimestamp);});
+      msgCache[jid]=uniqueRecs;
+      if(active&&active.jid===jid)renderMessages(uniqueRecs,scroll);
     }).catch(function(e){
       if(active&&active.jid===jid)$("cv-scroll").innerHTML='<div class="ml-empty">'+esc(netMsg(e))+'</div>';
     });
