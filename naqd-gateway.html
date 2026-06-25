@@ -771,16 +771,20 @@
           logLine("[Unread Debug] JID: " + jid + " | unreadCount: " + uCount, "info");
         }
         if (jid && !isGroupJid(jid)) {
-          var name = (c.pushName || c.name || "").toLowerCase();
+          var num = jidNum(jid);
+          var lid = jid.includes("@lid") ? jid : null;
+          var contact = contactsMap[num] || (lid && contactsMap[jidNum(lid)]);
+          var name = (c.pushName || c.name || (contact && contact.name) || "").toLowerCase();
+          
           if (name.indexOf("salman") > -1 || name.indexOf("exim") > -1) {
             var lm = c.lastMessage;
             var lmStr = lm ? ("fromMe: " + (lm.key && lm.key.fromMe) + " | status: " + lm.status) : "null";
-            logLine("[Raw Target Info] " + (c.pushName || c.name) + " | JID: " + jid + " | lastMsg: " + lmStr + " | unreadCount: " + c.unreadCount + " | unread: " + c.unread, "info");
+            logLine("[Raw Target Info] " + name + " | JID: " + jid + " | lastMsg: " + lmStr + " | unreadCount: " + c.unreadCount + " | unread: " + c.unread, "info");
           }
           if (indChatsInfo.length < 5) {
             var lm = c.lastMessage;
             var lmStr = lm ? ("fromMe: " + (lm.key && lm.key.fromMe) + " | status: " + lm.status) : "null";
-            indChatsInfo.push((c.pushName || c.name || jidNum(jid)) + " -> unreadCount: " + c.unreadCount + ", unread: " + c.unread + ", lastMsg: " + lmStr);
+            indChatsInfo.push((name || jidNum(jid)) + " -> unreadCount: " + c.unreadCount + ", unread: " + c.unread + ", lastMsg: " + lmStr);
           }
         }
       });
