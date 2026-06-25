@@ -744,11 +744,14 @@
     api("POST","/chat/findChats/"+encodeURIComponent(cfg.inst),{}).then(function(d){
       var arr=Array.isArray(d)?d:(d&&(d.records||d.chats))||[];
       if(arr.length>0){
-        var debugObj = {};
-        for(var k in arr[0]){
-          if(typeof arr[0][k] !== "object") debugObj[k] = arr[0][k];
+        var keys = Object.keys(arr[0]);
+        var matches = {};
+        for(var i=0;i<keys.length;i++){
+          var k=keys[i];
+          if(/unread|count/i.test(k)) matches[k] = arr[0][k];
         }
-        logLine("[Debug Chat] " + JSON.stringify(debugObj).slice(0, 200), "info");
+        logLine("[Debug Keys] " + keys.join(", "), "info");
+        logLine("[Debug Unread] " + JSON.stringify(matches), "info");
       }
       var map={};
       var parsedChatGroups=[];
