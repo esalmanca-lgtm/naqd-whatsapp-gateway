@@ -629,6 +629,13 @@
       arr.forEach(function(c){
         var jid=c.remoteJid||c.id;
         if(!jid||isGroupJid(jid))return;
+        
+        // TEMPORARY DEBUG LOG
+        var nm=(c.pushName||c.name||"").toLowerCase();
+        if(nm.indexOf("salman")>-1 || nm.indexOf("mufeed")>-1 || jid.indexOf("24486208")>-1 || jid.indexOf("230283")>-1 || jid.indexOf("919380525")>-1 || jid.indexOf("91974698")>-1){
+          logLine("DEBUG [" + jid + "]: " + JSON.stringify(c));
+        }
+
         var num=jidNum(jid);
         var name=(c.pushName||c.name||"").trim();
         if(name&&/^\+?[0-9\s\-]{7,}$/.test(name))name="";
