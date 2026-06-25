@@ -743,6 +743,13 @@
   function loadChats(){
     api("POST","/chat/findChats/"+encodeURIComponent(cfg.inst),{}).then(function(d){
       var arr=Array.isArray(d)?d:(d&&(d.records||d.chats))||[];
+      if(arr.length>0){
+        var debugObj = {};
+        for(var k in arr[0]){
+          if(typeof arr[0][k] !== "object") debugObj[k] = arr[0][k];
+        }
+        logLine("[Debug Chat] " + JSON.stringify(debugObj).slice(0, 200), "info");
+      }
       var map={};
       var parsedChatGroups=[];
       arr.forEach(function(c){
