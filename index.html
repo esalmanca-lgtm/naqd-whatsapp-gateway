@@ -162,9 +162,10 @@
   .ml-head{padding:16px 16px 10px;border-bottom:1px solid var(--line)}
   .ml-title-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
   .ml-title{font-family:var(--font-display);font-size:17px;font-weight:600;letter-spacing:-.01em}
-  .tabs{display:flex;gap:4px;background:var(--surface-2);border-radius:10px;padding:3px}
-  .tab{flex:1;border:0;background:transparent;color:var(--muted);font-size:12.5px;font-weight:600;
-    padding:7px;border-radius:8px;cursor:pointer;transition:.14s}
+  .tabs{display:flex;gap:4px;background:var(--surface-2);border-radius:10px;padding:3px;overflow-x:auto;white-space:nowrap;scrollbar-width:none;flex-wrap:nowrap}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{border:0;background:transparent;color:var(--muted);font-size:12.5px;font-weight:600;
+    padding:7px 12px;border-radius:8px;cursor:pointer;transition:.14s;white-space:nowrap;flex:none}
   .tab.active{background:var(--surface);color:var(--ink);box-shadow:var(--ring)}
   .search{position:relative;margin-top:12px}
   .search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--faint)}
@@ -330,6 +331,8 @@
       <input id="g-key" class="input mono" type="password" placeholder="apikey" autocomplete="off"></div>
     <div class="field"><label for="g-inst">Instance name</label>
       <input id="g-inst" class="input mono" placeholder="NAQDTEST" autocomplete="off"></div>
+    <div class="field"><label for="g-user">Username</label>
+      <input id="g-user" class="input mono" placeholder="admin" autocomplete="off"></div>
     <button id="g-go" class="btn primary full">Connect</button>
     <div id="g-err" class="gate-err"></div>
   </div>
@@ -368,10 +371,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
           </button>
         </div>
-        <div class="tabs">
-          <button class="tab active" data-tab="chats">Chats</button>
-          <button class="tab" data-tab="groups">Groups</button>
-        </div>
+        <div class="tabs" id="tab-bar"></div>
         <div class="search">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           <input id="chat-search" placeholder="Search" autocomplete="off">
@@ -395,6 +395,9 @@
             <div class="cv-sub" id="cv-subt">—</div>
           </div>
           <div style="flex:1"></div>
+          <button class="icon-btn" id="cv-manage" title="Manage Chat" style="width:34px;height:34px;margin-right:6px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><circle cx="12" cy="12" r="3"/><path d="M12 2v6M12 16v6M2 12h6M16 12h6"/></svg>
+          </button>
           <button class="icon-btn" id="cv-refresh" title="Refresh" style="width:34px;height:34px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
           </button>
@@ -466,10 +469,16 @@
         <div><h1>Tasks</h1><p id="task-count-sub">from tagged messages</p></div>
         <button class="btn primary" id="new-task"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New task</button>
       </div>
-      <div class="tk-filters">
+      <div class="tk-filters" style="align-items:center">
         <button class="chip active" data-filter="open">Open</button>
         <button class="chip" data-filter="all">All</button>
         <button class="chip" data-filter="done">Done</button>
+        <div style="flex:1"></div>
+        <select id="task-assign-filter" class="input" style="width:auto;padding:5px 10px;font-size:12.5px;border-radius:8px;margin:0;height:32px">
+          <option value="all">All Assigned</option>
+          <option value="me">Assigned to Me</option>
+          <option value="unassigned">Unassigned</option>
+        </select>
       </div>
       <div id="task-list"></div>
     </div>
@@ -483,6 +492,7 @@
 (function(){
   "use strict";
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
+  var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1";
   var REFRESH_MS=15000;
   var cfg=null, view="messages", chatTab="chats", taskFilter="open";
   var chats=[], groups=[], tasks=[], active=null, msgCache={}, searchTerm="";
@@ -491,6 +501,11 @@
   var lidMap={};
   try{lidMap=JSON.parse(lsGet(LKEY)||"{}");}catch(e){}
   var chatsGroups=[], apiGroups=[];
+  var users=["admin"], access={}, categories=["Personal", "Exim", "Naqd"], chatCategories={};
+  try{var savedUsers=JSON.parse(lsGet(UKEY)); if(Array.isArray(savedUsers))users=savedUsers;}catch(e){}
+  try{var savedAccess=JSON.parse(lsGet(AKEY)); if(savedAccess&&typeof savedAccess==="object")access=savedAccess;}catch(e){}
+  try{var savedCats=JSON.parse(lsGet(CKEY)); if(Array.isArray(savedCats))categories=savedCats;}catch(e){}
+  try{var savedChatCats=JSON.parse(lsGet(CCKEY)); if(savedChatCats&&typeof savedChatCats==="object")chatCategories=savedChatCats;}catch(e){}
 
   /* ---- storage ---- */
   function lsGet(k){try{return localStorage.getItem(k);}catch(e){return null;}}
@@ -810,14 +825,38 @@
     });
   }
   function currentList(){
-    var src=chatTab==="groups"?groups:chats;
+    var src;
+    if(chatTab === "chats" || chatTab === "chatsGroups"){
+      src=chats;
+    }else if(chatTab==="groups"){
+      src=groups;
+    }else{
+      var combined=chats.concat(groups);
+      src=combined.filter(function(c){
+        var cats=chatCategories[c.jid]||[];
+        return cats.indexOf(chatTab)>-1;
+      });
+    }
+    if(cfg && cfg.user && cfg.user !== "admin"){
+      src=src.filter(function(c){
+        var allowed=access[c.jid]||[];
+        if(allowed.length > 0) return allowed.indexOf(cfg.user) > -1;
+        return true;
+      });
+    }
     if(!searchTerm)return src;
     var q=searchTerm.toLowerCase();
     return src.filter(function(c){return (c.name||"").toLowerCase().indexOf(q)>-1||c.jid.indexOf(q)>-1;});
   }
   function renderChatList(){
     var box=$("chat-list"),list=currentList();box.innerHTML="";
-    if(!list.length){box.innerHTML='<div class="ml-empty">'+(chatTab==="groups"?"No groups found.":"No chats yet.")+'</div>';return;}
+    if(!list.length){
+      var emptyText = "No chats yet.";
+      if(chatTab==="groups")emptyText="No groups found.";
+      else if(chatTab!=="chats")emptyText="No chats in " + chatTab + ".";
+      box.innerHTML='<div class="ml-empty">'+emptyText+'</div>';
+      return;
+    }
     list.forEach(function(c){
       var it=el("div","chat-item"+(active&&active.jid===c.jid?" active":""));
       var av=el("div","avatar");avatarEl(av,c.name,c.pic);
@@ -834,7 +873,14 @@
     $("cv-blank").classList.add("hidden");$("cv-main").classList.remove("hidden");
     $("convo").classList.add("open");$("msg-list").classList.add("hide");
     $("cv-name").textContent=c.name;
-    $("cv-subt").textContent=isGroupJid(c.jid)?"group":jidNum(c.jid);
+    var chatCats = chatCategories[c.jid] || [];
+    var subtHtml = isGroupJid(c.jid) ? "group" : jidNum(c.jid);
+    if(chatCats.length > 0){
+      subtHtml += " &nbsp;·&nbsp; " + chatCats.map(function(cat){
+        return '<span class="cat-tag-chip" style="font-size:11px;background:var(--signal-soft);color:var(--signal);padding:2px 6px;border-radius:4px;font-weight:600">' + esc(cat) + '</span>';
+      }).join(" ");
+    }
+    $("cv-subt").innerHTML=subtHtml;
     avatarEl($("cv-avatar"),c.name,c.pic);
     renderChatList();
     $("cv-scroll").innerHTML='<div class="ml-loading">Loading messages…</div>';
@@ -1067,6 +1113,11 @@
   function openTaskModal(seed){
     seed=seed||{};
     var src=seed.source;
+    var assignOptions = '<option value="">Unassigned</option>';
+    users.forEach(function(u){
+      var selected = seed.assignedTo === u ? 'selected' : '';
+      assignOptions += '<option value="' + esc(u) + '" ' + selected + '>' + esc(u) + '</option>';
+    });
     openModal(
       '<h3>'+(seed.id?"Edit task":"New task")+'</h3>'+
       (src?'<p class="sub">From '+esc(src.chatName)+'</p>':'')+
@@ -1075,6 +1126,7 @@
       '<div class="row2"><div class="field"><label>Priority</label><select id="t-prio" class="input">'+
         '<option value="">Normal</option><option value="med">Medium</option><option value="high">High</option></select></div>'+
       '<div class="field"><label>Due</label><input id="t-due" class="input" type="date"></div></div>'+
+      '<div class="field"><label>Assign To</label><select id="t-assign" class="input">' + assignOptions + '</select></div>' +
       '<div class="modal-actions"><button class="btn" id="t-cancel">Cancel</button><button class="btn primary" id="t-save">'+(seed.id?"Save":"Add task")+'</button></div>'
     );
     $("t-title").value=seed.title||"";$("t-note").value=seed.note||"";
@@ -1085,10 +1137,10 @@
       var title=$("t-title").value.trim();if(!title){toast("Add a title","err");return;}
       if(seed.id){
         var t=tasks.filter(function(x){return x.id===seed.id;})[0];
-        if(t){t.title=title;t.note=$("t-note").value.trim();t.priority=$("t-prio").value;t.due=$("t-due").value;}
+        if(t){t.title=title;t.note=$("t-note").value.trim();t.priority=$("t-prio").value;t.due=$("t-due").value;t.assignedTo=$("t-assign").value;}
       }else{
         tasks.unshift({id:"t"+Date.now()+Math.random().toString(36).slice(2,6),title:title,
-          note:$("t-note").value.trim(),priority:$("t-prio").value,due:$("t-due").value,
+          note:$("t-note").value.trim(),priority:$("t-prio").value,due:$("t-due").value,assignedTo:$("t-assign").value,
           status:"open",createdAt:Date.now(),source:seed.source||null});
       }
       saveTasks();closeModal();renderTasks();
@@ -1098,9 +1150,18 @@
   }
   function renderTasks(){
     var box=$("task-list");box.innerHTML="";
+    var assignF = $("task-assign-filter") ? $("task-assign-filter").value : "all";
     var list=tasks.filter(function(t){
-      if(taskFilter==="open")return t.status!=="done";
-      if(taskFilter==="done")return t.status==="done";return true;});
+      if(taskFilter==="open" && t.status==="done")return false;
+      if(taskFilter==="done" && t.status!=="done")return false;
+      if(assignF === "me"){
+        var me = cfg && cfg.user ? cfg.user : "admin";
+        if(t.assignedTo !== me)return false;
+      } else if(assignF === "unassigned"){
+        if(t.assignedTo)return false;
+      }
+      return true;
+    });
     if(!list.length){
       box.innerHTML='<div class="tk-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><div>'+(taskFilter==="done"?"No completed tasks yet.":"Tag a message in any chat to turn it into a task.")+'</div></div>';return;}
     list.forEach(function(t){
@@ -1117,6 +1178,7 @@
       if(t.priority==="high"){var p=el("span","tk-badge high");p.textContent="High";meta.appendChild(p);}
       else if(t.priority==="med"){var p2=el("span","tk-badge med");p2.textContent="Medium";meta.appendChild(p2);}
       if(t.due){var dd=el("span","tk-badge due");dd.textContent="Due "+t.due;meta.appendChild(dd);}
+      if(t.assignedTo){var asg=el("span","tk-badge");asg.style.background="var(--surface-3)";asg.style.color="var(--ink)";asg.textContent="👤 "+t.assignedTo;meta.appendChild(asg);}
       body.appendChild(meta);
       var x=el("button","tk-x");x.title="Delete";x.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
       x.onclick=function(){tasks=tasks.filter(function(z){return z.id!==t.id;});saveTasks();renderTasks();if(view==="messages"&&active)renderMessages(msgCache[active.jid]||[],false);};
@@ -1160,11 +1222,218 @@
     $("nc-num").focus();$("nc-cancel").onclick=closeModal;
     $("nc-go").onclick=function(){var n=digits($("nc-num").value);if(n.length===10)n="91"+n;if(!n){toast("Enter a number","err");return;}closeModal();var jid=n+"@s.whatsapp.net";openChat({jid:jid,name:n,pic:null,updatedAt:0,last:""});};
   }
+  /* ============ CUSTOM TABS & CHAT SETTINGS ============ */
+  function renderTabs(){
+    var bar=$("tab-bar"); if(!bar)return;
+    bar.innerHTML="";
+    var std=["chats","groups"];
+    std.forEach(function(t){
+      var btn=el("button","tab"+(chatTab===t?" active":""));
+      btn.textContent=t.charAt(0).toUpperCase()+t.slice(1);
+      btn.onclick=function(){selectTab(t);};
+      bar.appendChild(btn);
+    });
+    categories.forEach(function(cat){
+      var btn=el("button","tab"+(chatTab===cat?" active":""));
+      btn.textContent=cat;
+      btn.onclick=function(){selectTab(cat);};
+      bar.appendChild(btn);
+    });
+    var add=el("button","tab");
+    add.innerHTML='<span style="font-weight:bold;font-size:14px;line-height:1">+</span>';
+    add.title="Add Category Tab";
+    add.onclick=function(ev){ev.stopPropagation();openAddTabModal();};
+    bar.appendChild(add);
+  }
+  function selectTab(tab){
+    chatTab=tab;
+    renderTabs();
+    renderChatList();
+  }
+  function openAddTabModal(){
+    openModal('<h3>Add Category Tab</h3><p class="sub">Create a new tab to group chats/groups.</p><div class="field"><label>Category Name</label><input id="new-cat-name" class="input" placeholder="e.g. Exim" autocomplete="off"></div><div class="modal-actions"><button class="btn" id="nc-cat-cancel">Cancel</button><button class="btn primary" id="nc-cat-go">Create</button></div>');
+    $("new-cat-name").focus();
+    $("nc-cat-cancel").onclick=closeModal;
+    $("nc-cat-go").onclick=function(){
+      var name=($("new-cat-name").value||"").trim();
+      if(!name){toast("Enter a name","err");return;}
+      if(name.toLowerCase()==="chats" || name.toLowerCase()==="groups" || name.toLowerCase()==="all"){
+        toast("Reserved name","err");return;
+      }
+      if(categories.indexOf(name)>-1){
+        toast("Category already exists","err");return;
+      }
+      categories.push(name);
+      lsSet(CKEY,JSON.stringify(categories));
+      closeModal();
+      selectTab(name);
+    };
+    $("new-cat-name").addEventListener("keydown",function(e){if(e.key==="Enter")$("nc-cat-go").click();});
+  }
+  function openManageChatModal(c){
+    var isAdm = cfg.user === "admin";
+    var chatCats = chatCategories[c.jid] || [];
+    var chatUsers = access[c.jid] || [];
+    var html = '<h3>Manage Chat: ' + esc(c.name) + '</h3><p class="sub">JID: ' + esc(c.jid) + '</p>';
+    html += '<div style="margin-top:16px"><label style="font-weight:600;font-size:13px;display:block;margin-bottom:8px">Categories (Tabs)</label>';
+    if(categories.length === 0){
+      html += '<p class="sub" style="margin:4px 0">No custom categories created yet.</p>';
+    } else {
+      html += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">';
+      categories.forEach(function(cat){
+        var checked = chatCats.indexOf(cat) > -1 ? 'checked' : '';
+        html += '<label class="chk-lbl" style="display:flex;align-items:center;gap:6px;font-size:13px;background:var(--surface-2);padding:6px 10px;border-radius:8px;border:1px solid var(--line);cursor:pointer">' +
+          '<input type="checkbox" class="cat-chk" value="' + esc(cat) + '" ' + checked + '> ' + esc(cat) + '</label>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+    if(isAdm){
+      html += '<div style="margin-top:16px"><label style="font-weight:600;font-size:13px;display:block;margin-bottom:8px">Assign Access (Admins Only)</label><p class="sub" style="margin:-4px 0 8px">If no users are checked, everyone has access by default.</p><div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">';
+      users.forEach(function(u){
+        if(u === "admin") return;
+        var checked = chatUsers.indexOf(u) > -1 ? 'checked' : '';
+        html += '<label class="chk-lbl" style="display:flex;align-items:center;gap:6px;font-size:13px;background:var(--surface-2);padding:6px 10px;border-radius:8px;border:1px solid var(--line);cursor:pointer"><input type="checkbox" class="user-chk" value="' + esc(u) + '" ' + checked + '> ' + esc(u) + '</label>';
+      });
+      html += '</div></div>';
+    }
+    html += '<div class="modal-actions" style="margin-top:20px"><button class="btn" id="mc-cancel">Cancel</button><button class="btn primary" id="mc-save">Save Settings</button></div>';
+    openModal(html);
+    $("mc-cancel").onclick = closeModal;
+    $("mc-save").onclick = function(){
+      var newCats = [];
+      document.querySelectorAll(".cat-chk").forEach(function(chk){if(chk.checked) newCats.push(chk.value);});
+      if(newCats.length > 0) chatCategories[c.jid] = newCats; else delete chatCategories[c.jid];
+      lsSet(CCKEY, JSON.stringify(chatCategories));
+      if(isAdm){
+        var newUsers = [];
+        document.querySelectorAll(".user-chk").forEach(function(chk){if(chk.checked) newUsers.push(chk.value);});
+        if(newUsers.length > 0) access[c.jid] = newUsers; else delete access[c.jid];
+        lsSet(AKEY, JSON.stringify(access));
+      }
+      closeModal();
+      toast("Settings saved", "ok");
+      loadChats();
+      if(active && active.jid === c.jid) openChat(c);
+    };
+  }
   function settingsModal(){
-    openModal('<h3>Settings</h3><p class="sub">'+esc(cfg.url.replace(/^https?:\/\//,""))+' · '+esc(cfg.inst)+'</p>'+
-      '<div class="modal-actions" style="justify-content:space-between"><button class="btn danger" id="s-out">Sign out</button><button class="btn" id="s-close">Close</button></div>');
-    $("s-close").onclick=closeModal;
-    $("s-out").onclick=function(){lsDel(KEY);location.reload();};
+    var isAdm = cfg.user === "admin";
+    var html = '<h3>Settings</h3>';
+    html += '<p class="sub">' + esc(cfg.url.replace(/^https?:\/\//,"")) + ' · ' + esc(cfg.inst) + ' (' + esc(cfg.user) + ')</p>';
+    if(isAdm){
+      html += '<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">';
+      html += '<label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">User Management</label>';
+      html += '<div style="display:flex;gap:6px;margin-bottom:8px">';
+      html += '<input id="new-username" class="input" placeholder="New username" style="padding:7px 10px;font-size:13px;height:34px">';
+      html += '<button class="btn primary" id="btn-add-user" style="padding:0 12px;height:34px">Add User</button>';
+      html += '</div>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px" id="users-list-box"></div>';
+      html += '</div>';
+      html += '<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">';
+      html += '<label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Categories Management</label>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px" id="cats-list-box"></div>';
+      html += '</div>';
+    }
+    html += '<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">';
+    html += '<label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Backup & Sync Config</label>';
+    html += '<p class="sub" style="margin:-4px 0 8px">Copy this text to paste on another device, or paste a backup here to import.</p>';
+    html += '<textarea id="sync-data-box" class="input mono" rows="3" style="font-size:11.5px;padding:8px" placeholder="Paste config JSON here to import"></textarea>';
+    html += '<div style="display:flex;gap:8px;margin-top:8px">';
+    html += '<button class="btn" id="btn-export-cfg" style="flex:1;justify-content:center">Export Config</button>';
+    html += '<button class="btn" id="btn-import-cfg" style="flex:1;justify-content:center">Import Config</button>';
+    html += '</div>';
+    html += '</div>';
+    html += '<div class="modal-actions" style="margin-top:20px;justify-content:space-between">';
+    html += '<button class="btn danger" id="s-out">Sign out</button>';
+    html += '<button class="btn" id="s-close">Close</button>';
+    html += '</div>';
+    openModal(html);
+    $("s-close").onclick = closeModal;
+    $("s-out").onclick = function(){lsDel(KEY);location.reload();};
+    $("btn-export-cfg").onclick = function(){
+      var dataObj = {users: users, access: access, categories: categories, chatCategories: chatCategories, tasks: tasks};
+      $("sync-data-box").value = JSON.stringify(dataObj);
+      $("sync-data-box").select();
+      toast("Config copied to input box", "ok");
+    };
+    $("btn-import-cfg").onclick = function(){
+      var txt = ($("sync-data-box").value || "").trim();
+      if(!txt) { toast("Paste config JSON first", "err"); return; }
+      try {
+        var parsed = JSON.parse(txt);
+        if(parsed.users && Array.isArray(parsed.users)) { users = parsed.users; lsSet(UKEY, JSON.stringify(users)); }
+        if(parsed.access && typeof parsed.access === "object") { access = parsed.access; lsSet(AKEY, JSON.stringify(access)); }
+        if(parsed.categories && Array.isArray(parsed.categories)) { categories = parsed.categories; lsSet(CKEY, JSON.stringify(categories)); }
+        if(parsed.chatCategories && typeof parsed.chatCategories === "object") { chatCategories = parsed.chatCategories; lsSet(CCKEY, JSON.stringify(chatCategories)); }
+        if(parsed.tasks && Array.isArray(parsed.tasks)) { tasks = parsed.tasks; saveTasks(); }
+        toast("Config imported successfully!", "ok");
+        closeModal();
+        renderTabs();
+        loadChats();
+        renderTasks();
+      } catch(e) {
+        toast("Invalid JSON format", "err");
+      }
+    };
+    if(isAdm){
+      var renderUserChips = function(){
+        var uBox = $("users-list-box"); uBox.innerHTML = "";
+        users.forEach(function(u){
+          var chip = el("div");
+          chip.style.display = "inline-flex"; chip.style.alignItems = "center"; chip.style.gap = "4px";
+          chip.style.background = "var(--surface-2)"; chip.style.border = "1px solid var(--line)";
+          chip.style.borderRadius = "6px"; chip.style.padding = "4px 8px"; chip.style.fontSize = "12px";
+          chip.innerHTML = '<span>' + esc(u) + '</span>';
+          if(u !== "admin"){
+            var del = el("button");
+            del.style.border = "0"; del.style.background = "transparent"; del.style.color = "var(--down)";
+            del.style.cursor = "pointer"; del.style.fontSize = "14px"; del.style.lineHeight = "1"; del.style.padding = "0 0 0 4px";
+            del.innerHTML = "&times;";
+            del.onclick = function(){
+              users = users.filter(function(x){return x!==u;});
+              lsSet(UKEY, JSON.stringify(users));
+              renderUserChips();
+            };
+            chip.appendChild(del);
+          }
+          uBox.appendChild(chip);
+        });
+      };
+      var renderCatChips = function(){
+        var cBox = $("cats-list-box"); cBox.innerHTML = "";
+        categories.forEach(function(cat){
+          var chip = el("div");
+          chip.style.display = "inline-flex"; chip.style.alignItems = "center"; chip.style.gap = "4px";
+          chip.style.background = "var(--surface-2)"; chip.style.border = "1px solid var(--line)";
+          chip.style.borderRadius = "6px"; chip.style.padding = "4px 8px"; chip.style.fontSize = "12px";
+          chip.innerHTML = '<span>' + esc(cat) + '</span>';
+          var del = el("button");
+          del.style.border = "0"; del.style.background = "transparent"; del.style.color = "var(--down)";
+          del.style.cursor = "pointer"; del.style.fontSize = "14px"; del.style.lineHeight = "1"; del.style.padding = "0 0 0 4px";
+          del.innerHTML = "&times;";
+          del.onclick = function(){
+            categories = categories.filter(function(x){return x!==cat;});
+            lsSet(CKEY, JSON.stringify(categories));
+            renderCatChips();
+            renderTabs();
+          };
+          chip.appendChild(del);
+          cBox.appendChild(chip);
+        });
+      };
+      $("btn-add-user").onclick = function(){
+        var u = ($("new-username").value || "").trim().toLowerCase();
+        if(!u) return;
+        if(users.indexOf(u) > -1) { toast("User already exists", "err"); return; }
+        users.push(u);
+        lsSet(UKEY, JSON.stringify(users));
+        $("new-username").value = "";
+        renderUserChips();
+      };
+      renderUserChips();
+      renderCatChips();
+    }
   }
 
   /* ============ THEME / VIEW ============ */
@@ -1188,12 +1457,13 @@
 
   /* ============ BOOT ============ */
   function start(c){
-    cfg=c;lsSet(KEY,JSON.stringify(c));
+    cfg=c;if(!cfg.user)cfg.user="admin";lsSet(KEY,JSON.stringify(c));
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
     $("host-label").textContent=h;$("foot-host").textContent="connected to "+h;
-    $("inst-name").textContent=cfg.inst;
+    $("inst-name").textContent=cfg.inst + " (" + cfg.user + ")";
     initDial();loadTasks();updateBadge();
+    renderTabs();
     loadChats();loadGroups();refreshDash();resetDial();
     setView("messages");
     // refresh chat list periodically
@@ -1203,27 +1473,27 @@
 
   /* ---- gate ---- */
   $("g-go").onclick=function(){
-    var url=trimUrl($("g-url").value),key=($("g-key").value||"").trim(),inst=($("g-inst").value||"").trim(),err=$("g-err");
+    var url=trimUrl($("g-url").value),key=($("g-key").value||"").trim(),inst=($("g-inst").value||"").trim(),user=($("g-user").value||"").trim().toLowerCase()||"admin",err=$("g-err");
     if(!/^https?:\/\//.test(url)){err.textContent="Address must start with http:// or https://";err.classList.add("show");return;}
     if(!key){err.textContent="Enter the API key.";err.classList.add("show");return;}
     if(!inst){err.textContent="Enter the instance name.";err.classList.add("show");return;}
     err.classList.remove("show");$("g-go").textContent="Connecting…";$("g-go").disabled=true;
-    cfg={url:url,key:key,inst:inst};
+    cfg={url:url,key:key,inst:inst,user:user};
     api("GET","/instance/connectionState/"+encodeURIComponent(inst)).then(function(){start(cfg);})
     .catch(function(e){api("GET","/instance/fetchInstances").then(function(){start(cfg);})
       .catch(function(e2){$("g-go").textContent="Connect";$("g-go").disabled=false;
         var m=(e2.status===401||e2.status===403)?"Key rejected — check the API key.":netMsg(e2);
         err.textContent=m;err.classList.add("show");});});
   };
-  ["g-url","g-key","g-inst"].forEach(function(id){$(id).addEventListener("keydown",function(e){if(e.key==="Enter")$("g-go").click();});});
+  ["g-url","g-key","g-inst","g-user"].forEach(function(id){$(id).addEventListener("keydown",function(e){if(e.key==="Enter")$("g-go").click();});});
 
   /* ---- wires ---- */
   document.querySelectorAll(".nav-btn[data-view]").forEach(function(b){b.onclick=function(){setView(b.getAttribute("data-view"));};});
   $("theme").onclick=function(){applyTheme(document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark");};
   $("settings").onclick=settingsModal;
-  document.querySelectorAll(".tab").forEach(function(t){t.onclick=function(){
-    chatTab=t.getAttribute("data-tab");document.querySelectorAll(".tab").forEach(function(x){x.classList.toggle("active",x===t);});
-    renderChatList();};});
+  renderTabs();
+  $("task-assign-filter").onchange=renderTasks;
+  $("cv-manage").onclick=function(){if(active)openManageChatModal(active);};
   document.querySelectorAll(".chip").forEach(function(c){c.onclick=function(){
     taskFilter=c.getAttribute("data-filter");document.querySelectorAll(".chip").forEach(function(x){x.classList.toggle("active",x===c);});
     renderTasks();};});
