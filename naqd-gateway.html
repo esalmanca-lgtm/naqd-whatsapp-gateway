@@ -743,6 +743,11 @@
   function loadChats(){
     api("POST","/chat/findChats/"+encodeURIComponent(cfg.inst),{}).then(function(d){
       var arr=Array.isArray(d)?d:(d&&(d.records||d.chats))||[];
+      arr.forEach(function(c){
+        if(c.unreadCount > 0){
+          logLine("[Unread Debug] JID: " + (c.remoteJid||c.id) + " | unreadCount: " + c.unreadCount, "info");
+        }
+      });
       var map={};
       var parsedChatGroups=[];
       arr.forEach(function(c){
