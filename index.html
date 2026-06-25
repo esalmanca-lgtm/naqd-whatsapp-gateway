@@ -771,13 +771,9 @@
           logLine("[Unread Debug] JID: " + jid + " | unreadCount: " + uCount, "info");
         }
         if (jid && !isGroupJid(jid) && loggedCount < 5) {
-          var details = [];
-          for (var k in c) {
-            if (typeof c[k] !== "object" || c[k] === null) {
-              details.push(k + ": " + c[k]);
-            }
-          }
-          logLine("[Raw Chat Info] JID: " + jid + " | " + details.join(" | ").slice(0, 200), "info");
+          var lm = c.lastMessage;
+          var lmStr = lm ? ("fromMe: " + (lm.key && lm.key.fromMe) + " | status: " + lm.status) : "null";
+          logLine("[Raw Chat Info] JID: " + jid + " | pushName: " + c.pushName + " | lastMsg: " + lmStr + " | unreadCount: " + c.unreadCount + " | unread: " + c.unread, "info");
           loggedCount++;
         }
       });
