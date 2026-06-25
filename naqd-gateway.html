@@ -505,7 +505,7 @@
 (function(){
   "use strict";
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
-  var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1";
+  var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1";
   var REFRESH_MS=15000;
   var cfg=null, view="messages", chatTab="chats", taskFilter="open";
   var chats=[], groups=[], tasks=[], active=null, msgCache={}, searchTerm="";
@@ -513,6 +513,14 @@
   var dashTimer=null, deadline=0, convoPoll=null, listPoll=null, resolving={};
   var lidMap={};
   try{lidMap=JSON.parse(lsGet(LKEY)||"{}");}catch(e){}
+  var failedLids={}, contactsMap={};
+  try{
+    var raw=JSON.parse(lsGet(FLKEY)||"{}");
+    var now=Date.now();
+    for(var k in raw){
+      if(now-raw[k]<24*60*60*1000){failedLids[k]=raw[k];}
+    }
+  }catch(e){}
   var chatsGroups=[], apiGroups=[], highlightMsgId=null;
   var users=["admin"], access={}, categories=["Personal", "Exim", "Naqd"], chatCategories={};
   try{var savedUsers=JSON.parse(lsGet(UKEY)); if(Array.isArray(savedUsers))users=savedUsers;}catch(e){}
@@ -680,6 +688,25 @@
   }
 
   /* ============ MESSAGES ============ */
+  function loadContactsList(){
+    if(!cfg)return Promise.resolve();
+    return api("POST","/chat/findContacts/"+encodeURIComponent(cfg.inst),{}).then(function(d){
+      var arr=Array.isArray(d)?d:(d&&(d.records||d.contacts))||[];
+      arr.forEach(function(co){
+        var jid=co.remoteJid||co.id||co.jid;
+        if(!jid)return;
+        var name=(co.name||co.pushName||"").trim();
+        if(name&&/^\+?[0-9\s\-]{7,}$/.test(name))name="";
+        var pic=co.profilePicUrl||co.profilePictureUrl||null;
+        if(name){
+          var num=jidNum(jid);
+          contactsMap[num]={name:name,pic:pic,jid:jid};
+        }
+      });
+    }).catch(function(e){
+      logLine("[Contacts] Err loading contacts: "+netMsg(e),"err");
+    });
+  }
   function loadChats(){
     api("POST","/chat/findChats/"+encodeURIComponent(cfg.inst),{}).then(function(d){
       var arr=Array.isArray(d)?d:(d&&(d.records||d.chats))||[];
@@ -721,6 +748,11 @@
         var name=(c.pushName||c.name||"").trim();
         if(name&&/^\+?[0-9\s\-]{7,}$/.test(name))name="";
         var pic=c.profilePicUrl||c.profilePictureUrl||null;
+        
+        var contact=contactsMap[num]||(lid&&contactsMap[jidNum(lid)]);
+        if(!name&&contact)name=contact.name;
+        if(!pic&&contact)pic=contact.pic;
+        
         var updatedAt=c.updatedAt?Date.parse(c.updatedAt):0;
         var last=c.lastMessage?msgText(c.lastMessage):"";
         
@@ -755,7 +787,9 @@
       renderChatList();
       // Background auto-resolve for LIDs
       chats.forEach(function(c){
-        if(c.jid.includes("@lid")&&!lidMap[c.jid]&&!resolving[c.jid]){
+        var failedTime=failedLids[c.jid]||0;
+        var isFailedRecently=(Date.now()-failedTime)<12*60*60*1000; // 12 hours cache
+        if(c.jid.includes("@lid")&&!lidMap[c.jid]&&!resolving[c.jid]&&!isFailedRecently){
           resolving[c.jid]=true;
           setTimeout(function(){
             logLine("[LID Auto] Resolving " + jidNum(c.jid) + "...");
@@ -785,7 +819,7 @@
               if(mapChanged){
                 lsSet(LKEY,JSON.stringify(lidMap));
                 loadChats();
-                return; // successfully resolved
+                return true; // successfully resolved
               }
               
               // Try 2: Query contact list for this JID if messages didn't work
@@ -815,8 +849,17 @@
                 if(mapChanged2){
                   lsSet(LKEY,JSON.stringify(lidMap));
                   loadChats();
+                  return true;
                 }
+                return false;
               });
+            })
+            .then(function(resolved){
+              if(!resolved){
+                failedLids[c.jid]=Date.now();
+                lsSet(FLKEY,JSON.stringify(failedLids));
+                logLine("[LID Auto] Failed to resolve " + jidNum(c.jid) + ". Caching failure.", "warn");
+              }
             })
             .catch(function(err){
               logLine("[LID Auto] Err resolving " + jidNum(c.jid) + ": " + netMsg(err), "err");
@@ -1509,7 +1552,7 @@
     for(var j=0;j<vs.length;j++)vs[j].classList.toggle("active",vs[j].getAttribute("data-view")===v);
     if(v==="dashboard"){refreshDash();}
     if(v==="tasks"){renderTasks();}
-    if(v==="messages"&&!chats.length&&!groups.length){loadChats();loadGroups();}
+    if(v==="messages"&&!chats.length&&!groups.length){loadContactsList().then(loadChats);loadGroups();}
   }
 
   /* ============ BOOT ============ */
@@ -1522,7 +1565,7 @@
     var ub=$("inst-user-badge");if(ub)ub.textContent=cfg.user;
     initDial();loadTasks();updateBadge();
     renderTabs();
-    loadChats();loadGroups();refreshDash();resetDial();
+    loadContactsList().then(loadChats);loadGroups();refreshDash();resetDial();
     setView("messages");
     // refresh chat list periodically
     if(listPoll)clearInterval(listPoll);
