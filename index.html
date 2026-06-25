@@ -691,10 +691,15 @@
         if(c.jid.includes("@lid")&&!lidMap[c.jid]&&!resolving[c.jid]){
           resolving[c.jid]=true;
           setTimeout(function(){
-            api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:c.jid}},page:1,offset:20})
+            logLine("[LID Auto] Resolving " + jidNum(c.jid) + "...");
+            
+            // Try 1: Scan messages
+            api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:c.jid}},page:1,offset:40})
             .then(function(d){
               var recs=d&&(d.messages&&d.messages.records?d.messages.records:(d.records||d));
               if(!Array.isArray(recs))recs=[];
+              logLine("[LID Auto] " + jidNum(c.jid) + ": Got " + recs.length + " msgs");
+              
               var mapChanged=false;
               recs.forEach(function(m){
                 var rJid=m.key&&m.key.remoteJid;
@@ -705,16 +710,52 @@
                   if(lidJid&&pnJid&&lidMap[lidJid]!==pnJid){
                     lidMap[lidJid]=pnJid;
                     mapChanged=true;
+                    logLine("[LID Auto] Found map in msgs: " + jidNum(lidJid) + " -> " + jidNum(pnJid), "ok");
                   }
                 }
               });
+              
               if(mapChanged){
                 lsSet(LKEY,JSON.stringify(lidMap));
                 loadChats();
+                return; // successfully resolved
               }
-            }).catch(function(){})
+              
+              // Try 2: Query contact list for this JID if messages didn't work
+              return api("POST","/chat/findContacts/"+encodeURIComponent(cfg.inst),{where:{remoteJid:c.jid}})
+              .then(function(contacts){
+                var arr=Array.isArray(contacts)?contacts:(contacts&&(contacts.records||contacts.contacts))||[];
+                logLine("[LID Auto] " + jidNum(c.jid) + ": Got " + arr.length + " contact recs");
+                
+                var mapChanged2=false;
+                arr.forEach(function(co){
+                  // Log keys of contact object to see what's in there
+                  logLine("[LID Auto] Contact keys: " + Object.keys(co).join(", "));
+                  // Try to find if there is an alternative JID or number/phone field
+                  var rJid=co.remoteJid||co.id||co.jid;
+                  var altJid=co.remoteJidAlt||co.phoneNumber||co.number||co.phone;
+                  if(rJid && altJid){
+                    var lidJid=rJid.includes("@lid")?rJid:(altJid.includes("@lid")?altJid:null);
+                    var pnJid=!rJid.includes("@lid")?rJid:(!altJid.includes("@lid")?altJid:null);
+                    if(lidJid&&pnJid&&lidMap[lidJid]!==pnJid){
+                      lidMap[lidJid]=pnJid;
+                      mapChanged2=true;
+                      logLine("[LID Auto] Found map in contacts: " + jidNum(lidJid) + " -> " + jidNum(pnJid), "ok");
+                    }
+                  }
+                });
+                
+                if(mapChanged2){
+                  lsSet(LKEY,JSON.stringify(lidMap));
+                  loadChats();
+                }
+              });
+            })
+            .catch(function(err){
+              logLine("[LID Auto] Err resolving " + jidNum(c.jid) + ": " + netMsg(err), "err");
+            })
             .then(function(){delete resolving[c.jid];});
-          },400+Math.random()*3000);
+          },600+Math.random()*4000);
         }
       });
     }).catch(function(e){
