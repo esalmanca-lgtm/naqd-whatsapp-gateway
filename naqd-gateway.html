@@ -129,6 +129,9 @@
   @keyframes pulse{0%{transform:scale(1);opacity:.55}70%,100%{transform:scale(2.6);opacity:0}}
   @media (prefers-reduced-motion:reduce){.beacon::after,.dial.spin .glyph svg{animation:none}}
   .conn-name{font-family:var(--font-display);font-weight:600;font-size:20px;letter-spacing:-.02em;line-height:1.1}
+  .inst-switch-select{font-family:var(--font-display);font-weight:600;font-size:20px;letter-spacing:-.02em;line-height:1.1;background:transparent;border:none;color:var(--text);padding:0 20px 0 0;margin:0;cursor:pointer;outline:none;-webkit-appearance:none;-moz-appearance:none;appearance:none;background-image:url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23a0a0a0%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E');background-repeat:no-repeat;background-position:right center;background-size:10px auto;max-width:100%;text-overflow:ellipsis}
+  .inst-switch-select option{background:var(--surface);color:var(--text)}
+  .conn-user-badge{font-size:11px;font-weight:600;color:var(--muted);background:var(--line);padding:3px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.02em}
   .conn-sub{font-size:12.5px;color:var(--muted);margin-top:3px;font-family:var(--font-mono);word-break:break-all}
   .pill{display:inline-flex;align-items:center;font-size:11px;font-weight:600;letter-spacing:.04em;
     text-transform:uppercase;padding:5px 10px;border-radius:999px;margin-top:8px;width:fit-content}
@@ -440,7 +443,11 @@
           <div class="conn-id">
             <span id="beacon" class="beacon"><i></i></span>
             <div style="min-width:0">
-              <div id="inst-name" class="conn-name">—</div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:2px">
+                <select id="inst-switch" class="inst-switch-select">—</select>
+                <span id="inst-user-badge" class="conn-user-badge"></span>
+                <div id="inst-name" class="conn-name" style="display:none">—</div>
+              </div>
               <div id="inst-sub" class="conn-sub">checking…</div>
               <span id="state-pill" class="pill warn">connecting</span>
             </div>
@@ -624,6 +631,33 @@
     $("dial").classList.add("spin");
     api("GET","/instance/fetchInstances").then(function(list){
       var arr=Array.isArray(list)?list:(list?[list]:[]),m=null;
+      var sw=$("inst-switch");
+      if(sw){
+        sw.innerHTML="";
+        var hasActive=false;
+        for(var i=0;i<arr.length;i++){
+          var x=arr[i].instance?arr[i].instance:arr[i];
+          var nm=pick(x,["name","instanceName"]);
+          if(nm){
+            var opt=el("option");
+            opt.value=nm;
+            opt.textContent=nm;
+            if(nm.toLowerCase()===cfg.inst.toLowerCase()){
+              opt.selected=true;
+              m=arr[i];
+              hasActive=true;
+            }
+            sw.appendChild(opt);
+          }
+        }
+        if(!hasActive){
+          var opt=el("option");
+          opt.value=cfg.inst;
+          opt.textContent=cfg.inst;
+          opt.selected=true;
+          sw.appendChild(opt);
+        }
+      }
       for(var i=0;i<arr.length;i++){var x=arr[i].instance?arr[i].instance:arr[i];
         var nm=pick(x,["name","instanceName"]);if(nm&&nm.toLowerCase()===cfg.inst.toLowerCase()){m=arr[i];break;}}
       if(!m&&arr.length===1)m=arr[0];
@@ -1485,6 +1519,7 @@
     var h=cfg.url.replace(/^https?:\/\//,"");
     $("host-label").textContent=h;$("foot-host").textContent="connected to "+h;
     $("inst-name").textContent=cfg.inst + " (" + cfg.user + ")";
+    var ub=$("inst-user-badge");if(ub)ub.textContent=cfg.user;
     initDial();loadTasks();updateBadge();
     renderTabs();
     loadChats();loadGroups();refreshDash();resetDial();
@@ -1534,6 +1569,18 @@
   $("dial").addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();refreshDash();}});
   $("btn-restart").onclick=doRestart;$("btn-disconnect").onclick=doDisconnect;$("btn-reconnect").onclick=doReconnect;
   $("sign-out").onclick=function(){lsDel(KEY);location.reload();};
+  $("inst-switch").onchange=function(e){
+    var newInst=e.target.value;
+    if(newInst&&newInst.toLowerCase()!==cfg.inst.toLowerCase()){
+      cfg.inst=newInst;lsSet(KEY,JSON.stringify(cfg));
+      logLine("Switched to instance: "+newInst);
+      setView("messages");active=null;
+      $("convo").classList.remove("open");$("msg-list").classList.remove("hide");
+      if(convoPoll)clearInterval(convoPoll);
+      $("chat-list").innerHTML='<div class="ml-empty">Loading chats…</div>';
+      loadChats();loadGroups();refreshDash();
+    }
+  };
   $("copy-host").onclick=function(){try{navigator.clipboard.writeText(cfg.url);toast("Address copied","ok");}catch(e){}};
   document.addEventListener("visibilitychange",function(){if(!document.hidden&&cfg){if(view==="dashboard")refreshDash();if(view==="messages"){loadChats();if(active)loadMessages(active.jid,false);}}});
 
