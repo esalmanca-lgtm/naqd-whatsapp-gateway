@@ -1060,6 +1060,23 @@
       
       uniqueRecs.sort(function(a,b){return tsMs(a.messageTimestamp)-tsMs(b.messageTimestamp);});
       msgCache[jid]=uniqueRecs;
+      if(uniqueRecs.length > 0){
+        var lastMsg = uniqueRecs[uniqueRecs.length - 1];
+        var chat = null;
+        for(var i=0;i<chats.length;i++){
+          if(chats[i].jid===jid){chat=chats[i];break;}
+        }
+        if(chat){
+          var lastTxt = msgText(lastMsg);
+          var lastTime = tsMs(lastMsg.messageTimestamp);
+          if(chat.last !== lastTxt || chat.updatedAt !== lastTime){
+            chat.last = lastTxt;
+            chat.updatedAt = lastTime;
+            chats.sort(function(a,b){return b.updatedAt - a.updatedAt;});
+            renderChatList();
+          }
+        }
+      }
       if(active&&active.jid===jid)renderMessages(uniqueRecs,scroll);
     }).catch(function(e){
       if(active&&active.jid===jid)$("cv-scroll").innerHTML='<div class="ml-empty">'+esc(netMsg(e))+'</div>';
@@ -1196,6 +1213,17 @@
     var recs=msgCache[targetJid]||[];
     recs.push({key:{remoteJid:targetJid,fromMe:true,id:"local-"+Date.now()},message:{conversation:text},messageTimestamp:Math.floor(Date.now()/1000)});
     msgCache[targetJid]=recs;renderMessages(recs,true);
+    // optimistic sidebar update
+    var chat = null;
+    for(var i=0;i<chats.length;i++){
+      if(chats[i].jid===targetJid){chat=chats[i];break;}
+    }
+    if(chat){
+      chat.last = text;
+      chat.updatedAt = Date.now();
+      chats.sort(function(a,b){return b.updatedAt - a.updatedAt;});
+      renderChatList();
+    }
     api("POST","/message/sendText/"+encodeURIComponent(cfg.inst),{number:number,text:text}).then(function(){
       setTimeout(function(){if(active&&active.jid===targetJid)loadMessages(active.jid,true);},900);
     }).catch(function(e){toast("Send failed","err");logLine(netMsg(e),"err");});
@@ -1228,7 +1256,19 @@
       return api("POST","/message/sendMedia/"+inst,{number:number,mediatype:mt,mimetype:f.type||"application/octet-stream",media:b64,fileName:f.name,caption:caption||""});
     }).then(function(){
       toast("File sent","ok");$("cv-text").value="";autoGrow($("cv-text"));
-      setTimeout(function(){if(active&&active.jid===targetJid)loadMessages(active.jid,true);},1400);
+      // optimistic sidebar update
+      var chat = null;
+      for(var i=0;i<chats.length;i++){
+        if(chats[i].jid===targetJid){chat=chats[i];break;}
+      }
+      if(chat){
+        var desc = /^image\//.test(f.type) ? "📷 Photo" : /^video\//.test(f.type) ? "🎬 Video" : /^audio\//.test(f.type) ? "🎙️ Voice message" : ("📄 " + f.name);
+        chat.last = desc;
+        chat.updatedAt = Date.now();
+        chats.sort(function(a,b){return b.updatedAt - a.updatedAt;});
+        renderChatList();
+      }
+      setTimeout(function(){if(active&&active.jid===targetJid)loadMessages(active.jid,true);},900);
     }).catch(function(e){toast("Send failed","err");logLine(netMsg(e),"err");});
   }
 
