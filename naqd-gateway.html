@@ -629,25 +629,28 @@
       arr.forEach(function(c){
         var jid=c.remoteJid||c.id;
         if(!jid||isGroupJid(jid))return;
+        var num=jidNum(jid);
         var name=(c.pushName||c.name||"").trim();
         if(name&&/^\+?[0-9\s\-]{7,}$/.test(name))name="";
         var pic=c.profilePicUrl||c.profilePictureUrl||null;
         var updatedAt=c.updatedAt?Date.parse(c.updatedAt):0;
         var last=c.lastMessage?msgText(c.lastMessage):"";
-        if(!map[jid]){
-          map[jid]={jid:jid,name:name||null,pic:pic,updatedAt:updatedAt,last:last};
+        if(!map[num]){
+          map[num]={jid:jid,name:name||null,pic:pic,updatedAt:updatedAt,last:last};
         }else{
-          if(!map[jid].name&&name)map[jid].name=name;
-          if(!map[jid].pic&&pic)map[jid].pic=pic;
-          if(updatedAt>map[jid].updatedAt){
-            map[jid].updatedAt=updatedAt;
-            if(last)map[jid].last=last;
+          if(!map[num].name&&name)map[num].name=name;
+          if(!map[num].pic&&pic)map[num].pic=pic;
+          var currentJid=map[num].jid||"";
+          if(updatedAt>map[num].updatedAt||(!currentJid.includes("@")&&jid.includes("@"))){
+            map[num].jid=jid;
+            map[num].updatedAt=updatedAt;
+            if(last)map[num].last=last;
           }
         }
       });
       chats=Object.keys(map).map(function(k){
         var o=map[k];
-        if(!o.name)o.name=jidNum(o.jid);
+        if(!o.name)o.name=o.jid?jidNum(o.jid):k;
         return o;
       }).sort(function(a,b){return b.updatedAt-a.updatedAt;});
       renderChatList();
