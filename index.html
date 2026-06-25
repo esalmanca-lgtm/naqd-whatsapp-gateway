@@ -643,7 +643,7 @@
         var updatedAt=c.updatedAt?Date.parse(c.updatedAt):0;
         var last=c.lastMessage?msgText(c.lastMessage):"";
         if(!map[num]){
-          map[num]={jid:jid,name:name||null,pic:pic,updatedAt:updatedAt,last:last};
+          map[num]={jid:jid,name:name||null,pic:pic,updatedAt:updatedAt,last:last,_raw:c};
         }else{
           if(!map[num].name&&name)map[num].name=name;
           if(!map[num].pic&&pic)map[num].pic=pic;
@@ -652,6 +652,7 @@
             map[num].jid=jid;
             map[num].updatedAt=updatedAt;
             if(last)map[num].last=last;
+            map[num]._raw=c;
           }
         }
       });
@@ -702,7 +703,7 @@
     $("cv-blank").classList.add("hidden");$("cv-main").classList.remove("hidden");
     $("convo").classList.add("open");$("msg-list").classList.add("hide");
     $("cv-name").textContent=c.name;
-    $("cv-subt").textContent=isGroupJid(c.jid)?"group":jidNum(c.jid);
+    $("cv-subt").textContent=JSON.stringify(c._raw||c);
     avatarEl($("cv-avatar"),c.name,c.pic);
     renderChatList();
     $("cv-scroll").innerHTML='<div class="ml-loading">Loading messages…</div>';
