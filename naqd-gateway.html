@@ -743,16 +743,6 @@
   function loadChats(){
     api("POST","/chat/findChats/"+encodeURIComponent(cfg.inst),{}).then(function(d){
       var arr=Array.isArray(d)?d:(d&&(d.records||d.chats))||[];
-      if(arr.length>0){
-        var keys = Object.keys(arr[0]);
-        var matches = {};
-        for(var i=0;i<keys.length;i++){
-          var k=keys[i];
-          if(/unread|count/i.test(k)) matches[k] = arr[0][k];
-        }
-        logLine("[Debug Keys] " + keys.join(", "), "info");
-        logLine("[Debug Unread] " + JSON.stringify(matches), "info");
-      }
       var map={};
       var parsedChatGroups=[];
       arr.forEach(function(c){
@@ -761,7 +751,7 @@
         if(isGroupJid(jid)){
           var name=(c.name||c.pushName||"").trim();
           var pic=c.profilePicUrl||c.profilePictureUrl||null;
-          var updatedAt=c.updatedAt?Date.parse(c.updatedAt):0;
+          var updatedAt=c.updatedAt?Date.parse(c.updatedAt):(c.lastMessage&&c.lastMessage.messageTimestamp?tsMs(c.lastMessage.messageTimestamp):0);
           var last=c.lastMessage?msgText(c.lastMessage):"";
           parsedChatGroups.push({jid:jid,name:name||"Group",pic:pic,updatedAt:updatedAt,last:last,unread:c.unreadCount||c.unread||0});
           return;
@@ -796,7 +786,7 @@
         if(!name&&contact)name=contact.name;
         if(!pic&&contact)pic=contact.pic;
         
-        var updatedAt=c.updatedAt?Date.parse(c.updatedAt):0;
+        var updatedAt=c.updatedAt?Date.parse(c.updatedAt):(c.lastMessage&&c.lastMessage.messageTimestamp?tsMs(c.lastMessage.messageTimestamp):0);
         var last=c.lastMessage?msgText(c.lastMessage):"";
         
         if(!map[num]){
