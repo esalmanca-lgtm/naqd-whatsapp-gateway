@@ -512,21 +512,51 @@
   var mediaCache={}, lastSig={};
   var dashTimer=null, deadline=0, convoPoll=null, listPoll=null, resolving={};
   var lidMap={};
-  try{lidMap=JSON.parse(lsGet(LKEY)||"{}");}catch(e){}
   var failedLids={}, contactsMap={};
-  try{
-    var raw=JSON.parse(lsGet(FLKEY)||"{}");
-    var now=Date.now();
-    for(var k in raw){
-      if(now-raw[k]<24*60*60*1000){failedLids[k]=raw[k];}
-    }
-  }catch(e){}
   var chatsGroups=[], apiGroups=[], highlightMsgId=null;
   var users=["admin"], access={}, categories=["Personal", "Exim", "Naqd"], chatCategories={};
-  try{var savedUsers=JSON.parse(lsGet(UKEY)); if(Array.isArray(savedUsers))users=savedUsers;}catch(e){}
-  try{var savedAccess=JSON.parse(lsGet(AKEY)); if(savedAccess&&typeof savedAccess==="object")access=savedAccess;}catch(e){}
-  try{var savedCats=JSON.parse(lsGet(CKEY)); if(Array.isArray(savedCats))categories=savedCats;}catch(e){}
-  try{var savedChatCats=JSON.parse(lsGet(CCKEY)); if(savedChatCats&&typeof savedChatCats==="object")chatCategories=savedChatCats;}catch(e){}
+
+  function initKeys(inst){
+    var suffix = "_" + inst.toLowerCase();
+    var oldTKEY = TKEY, oldLKEY = LKEY, oldFLKEY = FLKEY, oldUKEY = UKEY, oldAKEY = AKEY, oldCKEY = CKEY, oldCCKEY = CCKEY;
+    TKEY = "naqd_gw_tasks_v1" + suffix;
+    LKEY = "naqd_gw_lids_v1" + suffix;
+    FLKEY = "naqd_gw_failed_lids_v1" + suffix;
+    UKEY = "naqd_gw_users_v2" + suffix;
+    AKEY = "naqd_gw_access_v1" + suffix;
+    CKEY = "naqd_gw_categories_v2" + suffix;
+    CCKEY = "naqd_gw_chat_categories_v1" + suffix;
+    
+    var migrate = function(oldK, newK) {
+      try {
+        var oldVal = lsGet(oldK);
+        if (oldVal !== null && lsGet(newK) === null) {
+          lsSet(newK, oldVal);
+        }
+      } catch(e) {}
+    };
+    migrate(oldTKEY, TKEY);
+    migrate(oldLKEY, LKEY);
+    migrate(oldFLKEY, FLKEY);
+    migrate(oldUKEY, UKEY);
+    migrate(oldAKEY, AKEY);
+    migrate(oldCKEY, CKEY);
+    migrate(oldCCKEY, CCKEY);
+
+    lidMap={}; try{lidMap=JSON.parse(lsGet(LKEY)||"{}");}catch(e){}
+    failedLids={};
+    try{
+      var raw=JSON.parse(lsGet(FLKEY)||"{}");
+      var now=Date.now();
+      for(var k in raw){
+        if(now-raw[k]<24*60*60*1000){failedLids[k]=raw[k];}
+      }
+    }catch(e){}
+    users=["admin"]; try{var savedUsers=JSON.parse(lsGet(UKEY)); if(Array.isArray(savedUsers))users=savedUsers;}catch(e){}
+    access={}; try{var savedAccess=JSON.parse(lsGet(AKEY)); if(savedAccess&&typeof savedAccess==="object")access=savedAccess;}catch(e){}
+    categories=["Personal", "Exim", "Naqd"]; try{var savedCats=JSON.parse(lsGet(CKEY)); if(Array.isArray(savedCats))categories=savedCats;}catch(e){}
+    chatCategories={}; try{var savedChatCats=JSON.parse(lsGet(CCKEY)); if(savedChatCats&&typeof savedChatCats==="object")chatCategories=savedChatCats;}catch(e){}
+  }
 
   /* ---- storage ---- */
   function lsGet(k){try{return localStorage.getItem(k);}catch(e){return null;}}
@@ -1558,6 +1588,7 @@
   /* ============ BOOT ============ */
   function start(c){
     cfg=c;if(!cfg.user)cfg.user="admin";lsSet(KEY,JSON.stringify(c));
+    initKeys(cfg.inst);
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
     $("host-label").textContent=h;$("foot-host").textContent="connected to "+h;
@@ -1616,12 +1647,7 @@
     var newInst=e.target.value;
     if(newInst&&newInst.toLowerCase()!==cfg.inst.toLowerCase()){
       cfg.inst=newInst;lsSet(KEY,JSON.stringify(cfg));
-      logLine("Switched to instance: "+newInst);
-      setView("messages");active=null;
-      $("convo").classList.remove("open");$("msg-list").classList.remove("hide");
-      if(convoPoll)clearInterval(convoPoll);
-      $("chat-list").innerHTML='<div class="ml-empty">Loading chats…</div>';
-      loadChats();loadGroups();refreshDash();
+      location.reload();
     }
   };
   $("copy-host").onclick=function(){try{navigator.clipboard.writeText(cfg.url);toast("Address copied","ok");}catch(e){}};
