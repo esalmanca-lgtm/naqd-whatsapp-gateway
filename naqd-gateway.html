@@ -490,6 +490,7 @@
   var dashTimer=null, deadline=0, convoPoll=null, listPoll=null, resolving={};
   var lidMap={};
   try{lidMap=JSON.parse(lsGet(LKEY)||"{}");}catch(e){}
+  var chatsGroups=[], apiGroups=[];
 
   /* ---- storage ---- */
   function lsGet(k){try{return localStorage.getItem(k);}catch(e){return null;}}
@@ -628,9 +629,18 @@
     api("POST","/chat/findChats/"+encodeURIComponent(cfg.inst),{}).then(function(d){
       var arr=Array.isArray(d)?d:(d&&(d.records||d.chats))||[];
       var map={};
+      var parsedChatGroups=[];
       arr.forEach(function(c){
         var jid=c.remoteJid||c.id;
-        if(!jid||isGroupJid(jid))return;
+        if(!jid)return;
+        if(isGroupJid(jid)){
+          var name=(c.name||c.pushName||"").trim();
+          var pic=c.profilePicUrl||c.profilePictureUrl||null;
+          var updatedAt=c.updatedAt?Date.parse(c.updatedAt):0;
+          var last=c.lastMessage?msgText(c.lastMessage):"";
+          parsedChatGroups.push({jid:jid,name:name||"Group",pic:pic,updatedAt:updatedAt,last:last});
+          return;
+        }
         
         var num=jidNum(jid);
         var lid=null;
@@ -673,6 +683,8 @@
           }
         }
       });
+      chatsGroups=parsedChatGroups;
+      combineGroups();
       chats=Object.keys(map).map(function(k){
         var o=map[k];
         if(!o.name)o.name=o.jid?jidNum(o.jid):k;
@@ -762,16 +774,39 @@
       $("chat-list").innerHTML='<div class="ml-empty">'+esc(netMsg(e))+'</div>';
     });
   }
+  function combineGroups(){
+    var map={};
+    apiGroups.forEach(function(g){map[g.jid]=g;});
+    chatsGroups.forEach(function(g){
+      if(!map[g.jid]){
+        map[g.jid]=g;
+      }else{
+        if(g.name&&g.name!=="Group")map[g.jid].name=g.name;
+        if(g.pic)map[g.jid].pic=g.pic;
+        if(g.updatedAt>0)map[g.jid].updatedAt=g.updatedAt;
+        if(g.last)map[g.jid].last=g.last;
+      }
+    });
+    groups=Object.keys(map).map(function(k){return map[k];})
+    .sort(function(a,b){
+      if(b.updatedAt!==a.updatedAt)return b.updatedAt-a.updatedAt;
+      return (a.name||"").localeCompare(b.name||"");
+    });
+    if(chatTab==="groups")renderChatList();
+  }
   function loadGroups(){
     api("GET","/group/fetchAllGroups/"+encodeURIComponent(cfg.inst)+"?getParticipants=false").then(function(d){
       var arr=Array.isArray(d)?d:(d&&(d.groups||d.records))||[];
-      groups=arr.map(function(g){
+      apiGroups=arr.map(function(g){
         return {jid:g.id,name:g.subject||"Group",pic:g.pictureUrl||null,
           updatedAt:0,last:(g.size!=null?(g.size+" members"):"")};
       });
-      if(chatTab==="groups")renderChatList();
+      combineGroups();
     }).catch(function(e){
-      if(chatTab==="groups")$("chat-list").innerHTML='<div class="ml-empty">'+esc(netMsg(e))+'</div>';
+      combineGroups();
+      if(chatTab==="groups" && !groups.length){
+        $("chat-list").innerHTML='<div class="ml-empty">'+esc(netMsg(e))+'</div>';
+      }
     });
   }
   function currentList(){
