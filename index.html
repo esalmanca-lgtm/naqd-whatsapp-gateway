@@ -507,6 +507,18 @@
 <script>
 (function(){
   "use strict";
+  window.onerror = function(msg, url, line, col, error) {
+    var desc = msg + " at " + (url ? url.split("/").pop() : "unknown") + ":" + line + (col ? ":" + col : "");
+    if (error && error.stack) {
+      desc += "\n" + error.stack.split("\n").slice(0, 3).join("\n");
+    }
+    try {
+      logLine("[JS Error] " + desc, "err");
+    } catch(e) {
+      console.error("JS Error: " + desc);
+    }
+    return false;
+  };
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
   var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1";
   var REFRESH_MS=15000;
@@ -751,10 +763,22 @@
   function loadChats(){
     api("POST","/chat/findChats/"+encodeURIComponent(cfg.inst),{}).then(function(d){
       var arr=Array.isArray(d)?d:(d&&(d.records||d.chats))||[];
+      var loggedCount = 0;
       arr.forEach(function(c){
+        var jid = c.remoteJid || c.id;
         var uCount = parseUnread(c);
         if(uCount > 0){
-          logLine("[Unread Debug] JID: " + (c.remoteJid||c.id) + " | unreadCount: " + uCount, "info");
+          logLine("[Unread Debug] JID: " + jid + " | unreadCount: " + uCount, "info");
+        }
+        if (jid && !isGroupJid(jid) && loggedCount < 5) {
+          var details = [];
+          for (var k in c) {
+            if (typeof c[k] !== "object" || c[k] === null) {
+              details.push(k + ": " + c[k]);
+            }
+          }
+          logLine("[Raw Chat Info] JID: " + jid + " | " + details.join(" | ").slice(0, 200), "info");
+          loggedCount++;
         }
       });
       var map={};
