@@ -487,7 +487,7 @@
   var cfg=null, view="messages", chatTab="chats", taskFilter="open";
   var chats=[], groups=[], tasks=[], active=null, msgCache={}, searchTerm="";
   var mediaCache={}, lastSig={};
-  var dashTimer=null, deadline=0, convoPoll=null, listPoll=null;
+  var dashTimer=null, deadline=0, convoPoll=null, listPoll=null, resolving={};
   var lidMap={};
   try{lidMap=JSON.parse(lsGet(LKEY)||"{}");}catch(e){}
 
@@ -686,6 +686,37 @@
         }
       }
       renderChatList();
+      // Background auto-resolve for LIDs
+      chats.forEach(function(c){
+        if(c.jid.includes("@lid")&&!lidMap[c.jid]&&!resolving[c.jid]){
+          resolving[c.jid]=true;
+          setTimeout(function(){
+            api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:c.jid}},page:1,offset:20})
+            .then(function(d){
+              var recs=d&&(d.messages&&d.messages.records?d.messages.records:(d.records||d));
+              if(!Array.isArray(recs))recs=[];
+              var mapChanged=false;
+              recs.forEach(function(m){
+                var rJid=m.key&&m.key.remoteJid;
+                var altJid=m.key&&m.key.remoteJidAlt;
+                if(rJid&&altJid){
+                  var lidJid=rJid.includes("@lid")?rJid:(altJid.includes("@lid")?altJid:null);
+                  var pnJid=!rJid.includes("@lid")?rJid:(!altJid.includes("@lid")?altJid:null);
+                  if(lidJid&&pnJid&&lidMap[lidJid]!==pnJid){
+                    lidMap[lidJid]=pnJid;
+                    mapChanged=true;
+                  }
+                }
+              });
+              if(mapChanged){
+                lsSet(LKEY,JSON.stringify(lidMap));
+                loadChats();
+              }
+            }).catch(function(){})
+            .then(function(){delete resolving[c.jid];});
+          },400+Math.random()*3000);
+        }
+      });
     }).catch(function(e){
       $("chat-list").innerHTML='<div class="ml-empty">'+esc(netMsg(e))+'</div>';
     });
