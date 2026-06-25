@@ -763,20 +763,30 @@
   function loadChats(){
     api("POST","/chat/findChats/"+encodeURIComponent(cfg.inst),{}).then(function(d){
       var arr=Array.isArray(d)?d:(d&&(d.records||d.chats))||[];
-      var loggedCount = 0;
+      var indChatsInfo = [];
       arr.forEach(function(c){
         var jid = c.remoteJid || c.id;
         var uCount = parseUnread(c);
         if(uCount > 0){
           logLine("[Unread Debug] JID: " + jid + " | unreadCount: " + uCount, "info");
         }
-        if (jid && !isGroupJid(jid) && loggedCount < 5) {
-          var lm = c.lastMessage;
-          var lmStr = lm ? ("fromMe: " + (lm.key && lm.key.fromMe) + " | status: " + lm.status) : "null";
-          logLine("[Raw Chat Info] JID: " + jid + " | pushName: " + c.pushName + " | lastMsg: " + lmStr + " | unreadCount: " + c.unreadCount + " | unread: " + c.unread, "info");
-          loggedCount++;
+        if (jid && !isGroupJid(jid)) {
+          var name = (c.pushName || c.name || "").toLowerCase();
+          if (name.indexOf("salman") > -1 || name.indexOf("exim") > -1) {
+            var lm = c.lastMessage;
+            var lmStr = lm ? ("fromMe: " + (lm.key && lm.key.fromMe) + " | status: " + lm.status) : "null";
+            logLine("[Raw Target Info] " + (c.pushName || c.name) + " | JID: " + jid + " | lastMsg: " + lmStr + " | unreadCount: " + c.unreadCount + " | unread: " + c.unread, "info");
+          }
+          if (indChatsInfo.length < 5) {
+            var lm = c.lastMessage;
+            var lmStr = lm ? ("fromMe: " + (lm.key && lm.key.fromMe) + " | status: " + lm.status) : "null";
+            indChatsInfo.push((c.pushName || c.name || jidNum(jid)) + " -> unreadCount: " + c.unreadCount + ", unread: " + c.unread + ", lastMsg: " + lmStr);
+          }
         }
       });
+      if (indChatsInfo.length > 0) {
+        logLine("[Raw Chats Summary] " + indChatsInfo.join(" || "), "info");
+      }
       var map={};
       var parsedChatGroups=[];
       arr.forEach(function(c){
