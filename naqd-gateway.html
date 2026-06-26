@@ -507,7 +507,7 @@
 <script>
 (function(){
   "use strict";
-  console.log("Gateway UI Version: 1.14");
+  console.log("Gateway UI Version: 1.15");
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
   var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1", MCKEY="naqd_gw_msgcache_v1", RKEY="naqd_gw_read_ids_v1";
   var REFRESH_MS=15000;
@@ -889,8 +889,7 @@
             // Try 1: Scan messages
             api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:c.jid}},page:1,offset:40})
             .then(function(d){
-              var recs=d&&(d.messages&&d.messages.records?d.messages.records:(d.records||d));
-              if(!Array.isArray(recs))recs=[];
+              var recs=extractMessages(d);
               logLine("[LID Auto] " + jidNum(c.jid) + ": Got " + recs.length + " msgs");
               
               var mapChanged=false;
@@ -1110,17 +1109,8 @@
     
     Promise.all([p1,p2]).then(function(results){
       var d1=results[0], d2=results[1];
-      var recs1=d1&&(d1.messages&&d1.messages.records?d1.messages.records:(d1.records||d1));
-      if(!Array.isArray(recs1))recs1=[];
-      recs1=recs1.filter(function(m){return m&&m.key&&m.key.remoteJid===jid;});
-      
-      var recs2=[];
-      if(lid){
-        recs2=d2&&(d2.messages&&d2.messages.records?d2.messages.records:(d2.records||d2));
-        if(!Array.isArray(recs2))recs2=[];
-        recs2=recs2.filter(function(m){return m&&m.key&&m.key.remoteJid===lid;});
-      }
-      
+      var recs1=extractMessages(d1).filter(function(m){return m&&m.key&&m.key.remoteJid===jid;});
+      var recs2=lid?extractMessages(d2).filter(function(m){return m&&m.key&&m.key.remoteJid===lid;}):[];
       var recs=recs1.concat(recs2);
       var msgMap={};
       var uniqueRecs=[];
@@ -1245,7 +1235,16 @@
     if (Object.keys(mm).length === 0) return true;
     return false;
   }
-
+  function extractMessages(d) {
+    if (!d) return [];
+    if (Array.isArray(d)) return d;
+    if (d.messages) {
+      if (Array.isArray(d.messages)) return d.messages;
+      if (d.messages.records && Array.isArray(d.messages.records)) return d.messages.records;
+    }
+    if (d.records && Array.isArray(d.records)) return d.records;
+    return [];
+  }
   function renderMessages(recs,scroll){
     var jid=active.jid;
     var visibleRecs = (recs || []).filter(function(m){ return !isSystemOrInternalMessage(m); });
@@ -1826,7 +1825,7 @@
     initKeys(cfg.inst);
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
-    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.14)";
+    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.15)";
     $("inst-name").textContent=cfg.inst + " (" + cfg.user + ")";
     var ub=$("inst-user-badge");if(ub)ub.textContent=cfg.user;
     initDial();loadTasks();updateBadge();
