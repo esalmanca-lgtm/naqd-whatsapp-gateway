@@ -582,6 +582,25 @@
   function tsMs(t){t=Number(t)||0;return t<1e12?t*1000:t;}
   function digits(s){return (s||"").replace(/[^0-9]/g,"");}
   function jidNum(j){return (j||"").replace(/@.*/,"");}
+  function formatChatTime(time) {
+    if (!time) return "";
+    var now = new Date();
+    var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    var dateVal = new Date(time.getFullYear(), time.getMonth(), time.getDate());
+    var diffMs = today.getTime() - dateVal.getTime();
+    var diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays === 0) {
+      return pad(time.getHours()) + ":" + pad(time.getMinutes());
+    } else if (diffDays === 1) {
+      return "Yesterday";
+    } else if (diffDays < 7) {
+      var days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      return days[time.getDay()];
+    } else {
+      return pad(time.getDate()) + "/" + pad(time.getMonth() + 1) + "/" + time.getFullYear();
+    }
+  }
   function isGroupJid(j){return /@g\.us$/.test(j||"");}
 
   /* ---- API ---- */
@@ -777,7 +796,9 @@
         if(isGroupJid(jid)){
           var name=(c.name||c.pushName||"").trim();
           var pic=c.profilePicUrl||c.profilePictureUrl||null;
-          var updatedAt=c.updatedAt?Date.parse(c.updatedAt):(c.lastMessage&&c.lastMessage.messageTimestamp?tsMs(c.lastMessage.messageTimestamp):0);
+          var msgTime = (c.lastMessage && c.lastMessage.messageTimestamp) ? tsMs(c.lastMessage.messageTimestamp) : 0;
+          var dbTime = c.updatedAt ? Date.parse(c.updatedAt) : 0;
+          var updatedAt = Math.max(msgTime, dbTime);
           var last=c.lastMessage?msgText(c.lastMessage):"";
           parsedChatGroups.push({jid:jid,name:name||"Group",pic:pic,updatedAt:updatedAt,last:last,unread:uVal,_raw:c});
           return;
@@ -812,7 +833,9 @@
         if(!name&&contact)name=contact.name;
         if(!pic&&contact)pic=contact.pic;
         
-        var updatedAt=c.updatedAt?Date.parse(c.updatedAt):(c.lastMessage&&c.lastMessage.messageTimestamp?tsMs(c.lastMessage.messageTimestamp):0);
+        var msgTime = (c.lastMessage && c.lastMessage.messageTimestamp) ? tsMs(c.lastMessage.messageTimestamp) : 0;
+        var dbTime = c.updatedAt ? Date.parse(c.updatedAt) : 0;
+        var updatedAt = Math.max(msgTime, dbTime);
         var last=c.lastMessage?msgText(c.lastMessage):"";
         
         if(!map[num]){
@@ -1013,7 +1036,7 @@
         unreadHtml = '<span class="ci-unread">' + c.unread + '</span>';
         timeClass += ' highlight';
       }
-      body.innerHTML='<div class="ci-top"><span class="ci-name">'+esc(c.name)+'</span><span class="'+timeClass+'">'+(time?pad(time.getHours())+":"+pad(time.getMinutes()):"")+'</span></div><div class="ci-sub-row"><div class="ci-sub">'+esc(c.last||jidNum(c.jid))+'</div>'+unreadHtml+'</div>';
+      body.innerHTML='<div class="ci-top"><span class="ci-name">'+esc(c.name)+'</span><span class="'+timeClass+'">'+(time?formatChatTime(time):"")+'</span></div><div class="ci-sub-row"><div class="ci-sub">'+esc(c.last||jidNum(c.jid))+'</div>'+unreadHtml+'</div>';
       it.appendChild(av);it.appendChild(body);
       it.onclick=function(){openChat(c);};
       box.appendChild(it);
@@ -1152,7 +1175,11 @@
         var lastMsg = uniqueRecs[uniqueRecs.length - 1];
         var chat = null;
         for(var i=0;i<chats.length;i++){
-          if(chats[i].jid===jid){chat=chats[i];break;}
+          var cx = chats[i];
+          if(cx.jid===jid || cx.lid===jid || (lid && cx.jid===lid) || (lid && cx.lid===lid)){
+            chat=cx;
+            break;
+          }
         }
         if(chat){
           var lastTxt = msgText(lastMsg);
