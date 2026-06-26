@@ -762,7 +762,7 @@
           var pic=c.profilePicUrl||c.profilePictureUrl||null;
           var updatedAt=c.updatedAt?Date.parse(c.updatedAt):(c.lastMessage&&c.lastMessage.messageTimestamp?tsMs(c.lastMessage.messageTimestamp):0);
           var last=c.lastMessage?msgText(c.lastMessage):"";
-          parsedChatGroups.push({jid:jid,name:name||"Group",pic:pic,updatedAt:updatedAt,last:last,unread:uVal});
+          parsedChatGroups.push({jid:jid,name:name||"Group",pic:pic,updatedAt:updatedAt,last:last,unread:uVal,_raw:c});
           return;
         }
         
@@ -927,6 +927,7 @@
         if(g.updatedAt>0)map[g.jid].updatedAt=g.updatedAt;
         if(g.last)map[g.jid].last=g.last;
         map[g.jid].unread=Math.max(map[g.jid].unread||0, parseUnread(g, g.jid));
+        if(g._raw)map[g.jid]._raw=g._raw;
       }
     });
     groups=Object.keys(map).map(function(k){return map[k];})
@@ -1009,6 +1010,17 @@
     api("POST","/chat/markChatAsRead/"+encodeURIComponent(cfg.inst),{jid:c.jid}).catch(function(e){});
     if(c.lid){
       api("POST","/chat/markChatAsRead/"+encodeURIComponent(cfg.inst),{jid:c.lid}).catch(function(e){});
+    }
+    var raw = c._raw;
+    if(raw && raw.lastMessage && raw.lastMessage.key){
+      var km = raw.lastMessage.key;
+      api("POST","/chat/markMessageAsRead/"+encodeURIComponent(cfg.inst),{
+        readMessages: [{
+          remoteJid: km.remoteJid,
+          fromMe: !!km.fromMe,
+          id: km.id
+        }]
+      }).catch(function(e){});
     }
     $("cv-name").textContent=c.name;
     var chatCats = chatCategories[c.jid] || [];
