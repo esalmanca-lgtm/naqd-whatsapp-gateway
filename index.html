@@ -507,7 +507,7 @@
 <script>
 (function(){
   "use strict";
-  console.log("Gateway UI Version: 1.15");
+  console.log("Gateway UI Version: 1.16");
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
   var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1", MCKEY="naqd_gw_msgcache_v1", RKEY="naqd_gw_read_ids_v1";
   var REFRESH_MS=15000;
@@ -1224,7 +1224,13 @@
     }
     var mm = unwrap((m && m.message) || {});
     if (mm.reactionMessage) return true;
-    if (mm.senderKeyDistributionMessage) return true;
+    if (mm.senderKeyDistributionMessage) {
+      var hasDisplayContent = !!(mm.conversation || mm.extendedTextMessage || mm.imageMessage || 
+                                 mm.videoMessage || mm.audioMessage || mm.documentMessage || 
+                                 mm.stickerMessage || mm.locationMessage || mm.contactMessage || 
+                                 mm.contactsArrayMessage || mm.pollCreationMessage || mm.pollCreationMessageV3);
+      if (!hasDisplayContent) return true;
+    }
     if (mm.peerDataOperationRequestMessage || mm.peerDataOperationRequestResponseMessage) return true;
     if (mm.protocolMessage) {
       var type = mm.protocolMessage.type;
@@ -1825,7 +1831,7 @@
     initKeys(cfg.inst);
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
-    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.15)";
+    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.16)";
     $("inst-name").textContent=cfg.inst + " (" + cfg.user + ")";
     var ub=$("inst-user-badge");if(ub)ub.textContent=cfg.user;
     initDial();loadTasks();updateBadge();
