@@ -508,7 +508,7 @@
 (function(){
   "use strict";
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
-  var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1";
+  var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1", MCKEY="naqd_gw_msgcache_v1";
   var REFRESH_MS=15000;
   var cfg=null, view="messages", chatTab="chats", taskFilter="open";
   var chats=[], groups=[], tasks=[], active=null, msgCache={}, searchTerm="";
@@ -521,7 +521,7 @@
 
   function initKeys(inst){
     var suffix = "_" + inst.toLowerCase();
-    var oldTKEY = TKEY, oldLKEY = LKEY, oldFLKEY = FLKEY, oldUKEY = UKEY, oldAKEY = AKEY, oldCKEY = CKEY, oldCCKEY = CCKEY;
+    var oldTKEY = TKEY, oldLKEY = LKEY, oldFLKEY = FLKEY, oldUKEY = UKEY, oldAKEY = AKEY, oldCKEY = CKEY, oldCCKEY = CCKEY, oldMCKEY = MCKEY;
     TKEY = "naqd_gw_tasks_v1" + suffix;
     LKEY = "naqd_gw_lids_v1" + suffix;
     FLKEY = "naqd_gw_failed_lids_v1" + suffix;
@@ -529,6 +529,7 @@
     AKEY = "naqd_gw_access_v1" + suffix;
     CKEY = "naqd_gw_categories_v2" + suffix;
     CCKEY = "naqd_gw_chat_categories_v1" + suffix;
+    MCKEY = "naqd_gw_msgcache_v1" + suffix;
     
     var migrate = function(oldK, newK) {
       try {
@@ -545,6 +546,7 @@
     migrate(oldAKEY, AKEY);
     migrate(oldCKEY, CKEY);
     migrate(oldCCKEY, CCKEY);
+    migrate(oldMCKEY, MCKEY);
 
     lidMap={}; try{lidMap=JSON.parse(lsGet(LKEY)||"{}");}catch(e){}
     failedLids={};
@@ -559,6 +561,7 @@
     access={}; try{var savedAccess=JSON.parse(lsGet(AKEY)); if(savedAccess&&typeof savedAccess==="object")access=savedAccess;}catch(e){}
     categories=["Personal", "Exim", "Naqd"]; try{var savedCats=JSON.parse(lsGet(CKEY)); if(Array.isArray(savedCats))categories=savedCats;}catch(e){}
     chatCategories={}; try{var savedChatCats=JSON.parse(lsGet(CCKEY)); if(savedChatCats&&typeof savedChatCats==="object")chatCategories=savedChatCats;}catch(e){}
+    msgCache={}; try{msgCache=JSON.parse(lsGet(MCKEY)||"{}");}catch(e){}
   }
 
   /* ---- storage ---- */
@@ -1053,8 +1056,8 @@
       lid=target.lid;
     }
     
-    var p1=api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:jid}},page:1,offset:30});
-    var p2=lid?api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:lid}},page:1,offset:30}):Promise.resolve([]);
+    var p1=api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:jid}},page:1,offset:20});
+    var p2=lid?api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:lid}},page:1,offset:20}):Promise.resolve([]);
     
     Promise.all([p1,p2]).then(function(results){
       var d1=results[0], d2=results[1];
@@ -1101,6 +1104,11 @@
       
       uniqueRecs.sort(function(a,b){return tsMs(a.messageTimestamp)-tsMs(b.messageTimestamp);});
       msgCache[jid]=uniqueRecs;
+      var activeJids = chats.slice(0, 20).map(function(c){return c.jid;});
+      for(var k in msgCache){
+        if(activeJids.indexOf(k)===-1)delete msgCache[k];
+      }
+      lsSet(MCKEY,JSON.stringify(msgCache));
       if(uniqueRecs.length > 0){
         var lastMsg = uniqueRecs[uniqueRecs.length - 1];
         var chat = null;
