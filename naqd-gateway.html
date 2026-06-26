@@ -656,7 +656,7 @@
 
   /* ---- message helpers ---- */
   function msgText(m){
-    var mm=(m&&m.message)||{};
+    var mm=unwrap((m&&m.message)||{});
     if(mm.conversation)return mm.conversation;
     if(mm.extendedTextMessage&&mm.extendedTextMessage.text)return mm.extendedTextMessage.text;
     if(mm.imageMessage)return mm.imageMessage.caption?("\uD83D\uDCF7 "+mm.imageMessage.caption):"\uD83D\uDCF7 Photo";
@@ -666,8 +666,13 @@
     if(mm.stickerMessage)return "\uD83C\uDF1F Sticker";
     if(mm.locationMessage)return "\uD83D\uDCCD Location";
     if(mm.contactMessage||mm.contactsArrayMessage)return "\uD83D\uDC64 Contact";
-    if(mm.reactionMessage)return mm.reactionMessage.text||"reaction";
     if(mm.pollCreationMessage||mm.pollCreationMessageV3)return "\uD83D\uDCCA Poll";
+    if(mm.protocolMessage){
+      var type = mm.protocolMessage.type;
+      if(type === 3 || type === "REVOKE"){
+        return "🚫 This message was deleted";
+      }
+    }
     return "";
   }
 
@@ -1219,17 +1224,33 @@
   }
   function docName(m){var mm=unwrap((m&&m.message)||{});return (mm.documentMessage&&mm.documentMessage.fileName)||"Document";}
 
+  function isSystemOrInternalMessage(m) {
+    var mm = unwrap((m && m.message) || {});
+    if (mm.reactionMessage) return true;
+    if (mm.senderKeyDistributionMessage) return true;
+    if (mm.peerDataOperationRequestMessage || mm.peerDataOperationRequestResponseMessage) return true;
+    if (mm.protocolMessage) {
+      var type = mm.protocolMessage.type;
+      if (type !== 3 && type !== "REVOKE") {
+        return true;
+      }
+    }
+    if (Object.keys(mm).length === 0) return true;
+    return false;
+  }
+
   function renderMessages(recs,scroll){
     var jid=active.jid;
-    var sig=recs.length+"|"+(recs.length?((recs[recs.length-1].key||{}).id||""):"");
+    var visibleRecs = (recs || []).filter(function(m){ return !isSystemOrInternalMessage(m); });
+    var sig=visibleRecs.length+"|"+(visibleRecs.length?((visibleRecs[visibleRecs.length-1].key||{}).id||""):"");
     if(!scroll && sig===lastSig[jid])return;   // nothing new — keep DOM (don't interrupt audio/video)
     lastSig[jid]=sig;
     var box=$("cv-scroll");
     var stick=scroll||(box.scrollHeight-box.scrollTop-box.clientHeight<140);
     box.innerHTML="";
-    if(!recs.length){box.innerHTML='<div class="cv-blank" style="position:static"><h3>No messages</h3></div>';return;}
+    if(!visibleRecs.length){box.innerHTML='<div class="cv-blank" style="position:static"><h3>No messages</h3></div>';return;}
     var lastDay="",grp=isGroupJid(jid);
-    recs.forEach(function(m){
+    visibleRecs.forEach(function(m){
       var t=new Date(tsMs(m.messageTimestamp));
       var day=t.toDateString();
       if(day!==lastDay){lastDay=day;var sep=el("div","day-sep");sep.textContent=dayLabel(t);box.appendChild(sep);}
