@@ -656,6 +656,9 @@
 
   /* ---- message helpers ---- */
   function msgText(m){
+    if (m && (m.messageStubType === 1 || m.messageStubType === "REVOKE" || m.messageStubType === 3)) {
+      return "This message was deleted";
+    }
     var mm=unwrap((m&&m.message)||{});
     if(mm.conversation)return mm.conversation;
     if(mm.extendedTextMessage&&mm.extendedTextMessage.text)return mm.extendedTextMessage.text;
@@ -1225,6 +1228,9 @@
   function docName(m){var mm=unwrap((m&&m.message)||{});return (mm.documentMessage&&mm.documentMessage.fileName)||"Document";}
 
   function isSystemOrInternalMessage(m) {
+    if (m && (m.messageStubType === 1 || m.messageStubType === "REVOKE" || m.messageStubType === 3)) {
+      return false;
+    }
     var mm = unwrap((m && m.message) || {});
     if (mm.reactionMessage) return true;
     if (mm.senderKeyDistributionMessage) return true;
@@ -1265,6 +1271,9 @@
           body.innerHTML='<span style="font-style:normal;margin-right:4px;">🚫</span> ' + esc(txt);
         } else {
           body.textContent=txt||"[message]";
+          if(!txt){
+            console.log("Raw unrecognized message:", m);
+          }
         }
         b.appendChild(body);
       } else {
