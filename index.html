@@ -1227,7 +1227,7 @@
     }
     if(mediaCache[id]){paint(mediaCache[id]);return;}
     slot.innerHTML='<div class="media-load">Loading…</div>';
-    api("POST","/chat/getBase64FromMediaMessage/"+encodeURIComponent(cfg.inst),{message:{key:{id:id}},convertToMp4:false})
+    api("POST","/chat/getBase64FromMediaMessage/"+encodeURIComponent(cfg.inst),{message:m,convertToMp4:false})
     .then(function(d){
       if(!d||!d.base64)throw new Error("No media returned");
       var mime=((d.mimetype||"").split(";")[0])||(kind==="image"?"image/jpeg":kind==="audio"?"audio/ogg":kind==="video"?"video/mp4":"application/octet-stream");
