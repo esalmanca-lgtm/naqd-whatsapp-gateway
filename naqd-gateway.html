@@ -670,7 +670,7 @@
     if(mm.protocolMessage){
       var type = mm.protocolMessage.type;
       if(type === 3 || type === "REVOKE"){
-        return "🚫 This message was deleted";
+        return "This message was deleted";
       }
     }
     return "";
@@ -1258,7 +1258,15 @@
       var row=el("div","row "+(out?"out":"in")),b=el("div","bubble");
       if(grp&&!out){var au=el("div","b-author");au.textContent=m.pushName||jidNum((m.key&&m.key.participant)||"");if(au.textContent)b.appendChild(au);}
       if(kind==="text"){
-        var body=el("div");body.style.whiteSpace="pre-wrap";body.textContent=txt||"[message]";b.appendChild(body);
+        var body=el("div");body.style.whiteSpace="pre-wrap";
+        if(txt === "This message was deleted"){
+          body.style.fontStyle="italic";
+          body.style.opacity="0.67";
+          body.innerHTML='<span style="font-style:normal;margin-right:4px;">🚫</span> ' + esc(txt);
+        } else {
+          body.textContent=txt||"[message]";
+        }
+        b.appendChild(body);
       } else {
         var slot=el("div","b-slot");b.appendChild(slot);
         if(kind==="image"||kind==="sticker"||kind==="audio"){ensureMedia(m,slot,kind);}
