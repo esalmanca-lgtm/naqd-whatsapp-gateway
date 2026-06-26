@@ -1029,7 +1029,11 @@
     $("cv-subt").innerHTML=subtHtml;
     avatarEl($("cv-avatar"),c.name,c.pic);
     renderChatList();
-    $("cv-scroll").innerHTML='<div class="ml-loading">Loading messages…</div>';
+    if(msgCache[c.jid] && msgCache[c.jid].length > 0){
+      renderMessages(msgCache[c.jid],true);
+    } else {
+      $("cv-scroll").innerHTML='<div class="ml-loading">Loading messages…</div>';
+    }
     loadMessages(c,true);
     if(convoPoll)clearInterval(convoPoll);
     convoPoll=setInterval(function(){if(!document.hidden&&view==="messages"&&active&&active.jid===c.jid)loadMessages(active,false);},9000);
@@ -1045,8 +1049,8 @@
       lid=target.lid;
     }
     
-    var p1=api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:jid}},page:1,offset:60});
-    var p2=lid?api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:lid}},page:1,offset:60}):Promise.resolve([]);
+    var p1=api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:jid}},page:1,offset:30});
+    var p2=lid?api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:lid}},page:1,offset:30}):Promise.resolve([]);
     
     Promise.all([p1,p2]).then(function(results){
       var d1=results[0], d2=results[1];
