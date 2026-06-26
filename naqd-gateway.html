@@ -507,7 +507,7 @@
 <script>
 (function(){
   "use strict";
-  console.log("Gateway UI Version: 1.13");
+  console.log("Gateway UI Version: 1.14");
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
   var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1", MCKEY="naqd_gw_msgcache_v1", RKEY="naqd_gw_read_ids_v1";
   var REFRESH_MS=15000;
@@ -1105,8 +1105,8 @@
       lid=target.lid;
     }
     
-    var p1=api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:jid}},page:1,offset:20});
-    var p2=lid?api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:lid}},page:1,offset:20}):Promise.resolve([]);
+    var p1=api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:jid}},page:1,offset:100});
+    var p2=lid?api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:lid}},page:1,offset:100}):Promise.resolve([]);
     
     Promise.all([p1,p2]).then(function(results){
       var d1=results[0], d2=results[1];
@@ -1826,7 +1826,7 @@
     initKeys(cfg.inst);
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
-    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.12)";
+    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.14)";
     $("inst-name").textContent=cfg.inst + " (" + cfg.user + ")";
     var ub=$("inst-user-badge");if(ub)ub.textContent=cfg.user;
     initDial();loadTasks();updateBadge();
