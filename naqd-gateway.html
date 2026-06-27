@@ -345,6 +345,8 @@
       <input id="g-inst" class="input mono" placeholder="NAQDTEST" autocomplete="off"></div>
     <div class="field"><label for="g-user">Username</label>
       <input id="g-user" class="input mono" placeholder="admin" autocomplete="off"></div>
+    <div class="field"><label for="g-pass">User password</label>
+      <input id="g-pass" class="input mono" type="password" placeholder="Optional" autocomplete="off"></div>
     <button id="g-go" class="btn primary full">Connect</button>
     <div id="g-err" class="gate-err"></div>
   </div>
@@ -528,7 +530,7 @@
   var lidMap={};
   var failedLids={}, contactsMap={};
   var chatsGroups=[], apiGroups=[], highlightMsgId=null;
-  var users=["admin"], access={}, categories=["Personal", "Exim", "Naqd"], chatCategories={};
+  var users=[{username:"admin", password:""}], access={}, categories=["Personal", "Exim", "Naqd"], chatCategories={};
   var readMessageIds={};
 
   function initKeys(inst){
@@ -571,7 +573,16 @@
         if(now-raw[k]<24*60*60*1000){failedLids[k]=raw[k];}
       }
     }catch(e){}
-    users=["admin"]; try{var savedUsers=JSON.parse(lsGet(UKEY)); if(Array.isArray(savedUsers))users=savedUsers;}catch(e){}
+    users=[{username:"admin", password:""}];
+    try{
+      var savedUsers=JSON.parse(lsGet(UKEY));
+      if(Array.isArray(savedUsers)){
+        users=savedUsers.map(function(u){
+          if(typeof u==="string")return {username:u, password:""};
+          return u;
+        });
+      }
+    }catch(e){}
     access={}; try{var savedAccess=JSON.parse(lsGet(AKEY)); if(savedAccess&&typeof savedAccess==="object")access=savedAccess;}catch(e){}
     categories=["Personal", "Exim", "Naqd"]; try{var savedCats=JSON.parse(lsGet(CKEY)); if(Array.isArray(savedCats))categories=savedCats;}catch(e){}
     chatCategories={}; try{var savedChatCats=JSON.parse(lsGet(CCKEY)); if(savedChatCats&&typeof savedChatCats==="object")chatCategories=savedChatCats;}catch(e){}
@@ -1533,8 +1544,9 @@
     var src=seed.source;
     var assignOptions = '<option value="">Unassigned</option>';
     users.forEach(function(u){
-      var selected = seed.assignedTo === u ? 'selected' : '';
-      assignOptions += '<option value="' + esc(u) + '" ' + selected + '>' + esc(u) + '</option>';
+      var name = typeof u === "string" ? u : u.username;
+      var selected = seed.assignedTo === name ? 'selected' : '';
+      assignOptions += '<option value="' + esc(name) + '" ' + selected + '>' + esc(name) + '</option>';
     });
     openModal(
       '<h3>'+(seed.id?"Edit task":"New task")+'</h3>'+
@@ -1569,14 +1581,24 @@
   function renderTasks(){
     var box=$("task-list");box.innerHTML="";
     var assignF = $("task-assign-filter") ? $("task-assign-filter").value : "all";
+    var assignFilterEl = $("task-assign-filter");
+    var isAdm = cfg && cfg.user === "admin";
+    if (assignFilterEl) {
+      assignFilterEl.classList.toggle("hidden", !isAdm);
+    }
     var list=tasks.filter(function(t){
       if(taskFilter==="open" && t.status==="done")return false;
       if(taskFilter==="done" && t.status!=="done")return false;
-      if(assignF === "me"){
+      if (!isAdm) {
         var me = cfg && cfg.user ? cfg.user : "admin";
-        if(t.assignedTo !== me)return false;
-      } else if(assignF === "unassigned"){
-        if(t.assignedTo)return false;
+        if (t.assignedTo !== me) return false;
+      } else {
+        if(assignF === "me"){
+          var me = cfg && cfg.user ? cfg.user : "admin";
+          if(t.assignedTo !== me)return false;
+        } else if(assignF === "unassigned"){
+          if(t.assignedTo)return false;
+        }
       }
       return true;
     });
@@ -1733,9 +1755,10 @@
     if(isAdm){
       html += '<div style="margin-top:16px"><label style="font-weight:600;font-size:13px;display:block;margin-bottom:8px">Assign Access (Admins Only)</label><p class="sub" style="margin:-4px 0 8px">If no users are checked, everyone has access by default.</p><div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">';
       users.forEach(function(u){
-        if(u === "admin") return;
-        var checked = chatUsers.indexOf(u) > -1 ? 'checked' : '';
-        html += '<label class="chk-lbl" style="display:flex;align-items:center;gap:6px;font-size:13px;background:var(--surface-2);padding:6px 10px;border-radius:8px;border:1px solid var(--line);cursor:pointer"><input type="checkbox" class="user-chk" value="' + esc(u) + '" ' + checked + '> ' + esc(u) + '</label>';
+        var name = typeof u === "string" ? u : u.username;
+        if(name === "admin") return;
+        var checked = chatUsers.indexOf(name) > -1 ? 'checked' : '';
+        html += '<label class="chk-lbl" style="display:flex;align-items:center;gap:6px;font-size:13px;background:var(--surface-2);padding:6px 10px;border-radius:8px;border:1px solid var(--line);cursor:pointer"><input type="checkbox" class="user-chk" value="' + esc(name) + '" ' + checked + '> ' + esc(name) + '</label>';
       });
       html += '</div></div>';
     }
@@ -1766,9 +1789,10 @@
     if(isAdm){
       html += '<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">';
       html += '<label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">User Management</label>';
-      html += '<div style="display:flex;gap:6px;margin-bottom:8px">';
+      html += '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">';
       html += '<input id="new-username" class="input" placeholder="New username" style="padding:7px 10px;font-size:13px;height:34px">';
-      html += '<button class="btn primary" id="btn-add-user" style="padding:0 12px;height:34px">Add User</button>';
+      html += '<input id="new-password" class="input" type="password" placeholder="Password" style="padding:7px 10px;font-size:13px;height:34px">';
+      html += '<button class="btn primary" id="btn-add-user" style="padding:0 12px;height:34px;justify-content:center">Add User</button>';
       html += '</div>';
       html += '<div style="display:flex;flex-wrap:wrap;gap:6px" id="users-list-box"></div>';
       html += '</div>';
@@ -1822,18 +1846,22 @@
       var renderUserChips = function(){
         var uBox = $("users-list-box"); uBox.innerHTML = "";
         users.forEach(function(u){
+          var name = typeof u === "string" ? u : u.username;
           var chip = el("div");
           chip.style.display = "inline-flex"; chip.style.alignItems = "center"; chip.style.gap = "4px";
           chip.style.background = "var(--surface-2)"; chip.style.border = "1px solid var(--line)";
           chip.style.borderRadius = "6px"; chip.style.padding = "4px 8px"; chip.style.fontSize = "12px";
-          chip.innerHTML = '<span>' + esc(u) + '</span>';
-          if(u !== "admin"){
+          chip.innerHTML = '<span>' + esc(name) + '</span>';
+          if(name !== "admin"){
             var del = el("button");
             del.style.border = "0"; del.style.background = "transparent"; del.style.color = "var(--down)";
             del.style.cursor = "pointer"; del.style.fontSize = "14px"; del.style.lineHeight = "1"; del.style.padding = "0 0 0 4px";
             del.innerHTML = "&times;";
             del.onclick = function(){
-              users = users.filter(function(x){return x!==u;});
+              users = users.filter(function(x){
+                var xName = typeof x === "string" ? x : x.username;
+                return xName !== name;
+              });
               lsSet(UKEY, JSON.stringify(users));
               renderUserChips();
             };
@@ -1866,11 +1894,17 @@
       };
       $("btn-add-user").onclick = function(){
         var u = ($("new-username").value || "").trim().toLowerCase();
+        var p = ($("new-password").value || "").trim();
         if(!u) return;
-        if(users.indexOf(u) > -1) { toast("User already exists", "err"); return; }
-        users.push(u);
+        var exists = users.some(function(x){
+          var xName = typeof x === "string" ? x : x.username;
+          return xName === u;
+        });
+        if(exists) { toast("User already exists", "err"); return; }
+        users.push({username: u, password: p});
         lsSet(UKEY, JSON.stringify(users));
         $("new-username").value = "";
+        $("new-password").value = "";
         renderUserChips();
       };
       renderUserChips();
@@ -1897,10 +1931,172 @@
     if(v==="messages"&&!chats.length&&!groups.length){loadContactsList().then(loadChats);loadGroups();}
   }
 
+  /* ============ MENTION AUTOCOMPLETE ============ */
+  var mentionIndex = -1;
+  var currentMentions = [];
+  var currentAtPos = -1;
+
+  function initMentionAutocomplete() {
+    var ta = $("cv-text");
+    if (!ta) return;
+    
+    var dd = $("mention-dropdown");
+    if (!dd) {
+      dd = el("div");
+      dd.id = "mention-dropdown";
+      dd.className = "hidden";
+      dd.style.position = "absolute";
+      dd.style.bottom = "64px";
+      dd.style.left = "16px";
+      dd.style.background = "var(--surface)";
+      dd.style.border = "1px solid var(--line)";
+      dd.style.borderRadius = "10px";
+      dd.style.boxShadow = "var(--ring-lift)";
+      dd.style.zIndex = "50";
+      dd.style.maxHeight = "160px";
+      dd.style.overflowY = "auto";
+      dd.style.minWidth = "160px";
+      dd.style.padding = "4px 0";
+      
+      var main = $("cv-main");
+      if (main) {
+        main.style.position = "relative";
+        main.insertBefore(dd, main.querySelector(".cv-input"));
+      }
+    }
+
+    ta.addEventListener("input", handleMentionInput);
+    ta.addEventListener("keydown", handleMentionKeydown);
+  }
+
+  function handleMentionInput() {
+    var ta = $("cv-text");
+    var val = ta.value;
+    var pos = ta.selectionStart;
+    var textBefore = val.slice(0, pos);
+    var lastAt = textBefore.lastIndexOf("@");
+    
+    if (lastAt !== -1) {
+      var queryText = textBefore.slice(lastAt + 1);
+      if (!/\s/.test(queryText)) {
+        showMentionDropdown(queryText, lastAt);
+        return;
+      }
+    }
+    hideMentionDropdown();
+  }
+
+  function showMentionDropdown(q, atPos) {
+    var dd = $("mention-dropdown");
+    if (!dd) return;
+    q = q.toLowerCase();
+    currentAtPos = atPos;
+    
+    var matches = users.filter(function(u) {
+      var name = typeof u === "string" ? u : u.username;
+      return name.toLowerCase().includes(q);
+    });
+    
+    if (matches.length === 0) {
+      hideMentionDropdown();
+      return;
+    }
+    
+    currentMentions = matches;
+    dd.innerHTML = "";
+    mentionIndex = Math.min(mentionIndex, matches.length - 1);
+    if (mentionIndex < 0 && matches.length > 0) mentionIndex = 0;
+    
+    matches.forEach(function(u, idx) {
+      var name = typeof u === "string" ? u : u.username;
+      var item = el("div");
+      item.style.padding = "8px 12px";
+      item.style.fontSize = "13px";
+      item.style.cursor = "pointer";
+      item.style.color = "var(--ink)";
+      if (idx === mentionIndex) {
+        item.style.background = "var(--surface-3)";
+      }
+      item.textContent = "@" + name;
+      item.onmouseenter = function() {
+        mentionIndex = idx;
+        showMentionDropdown(q, atPos);
+      };
+      item.onclick = function(e) {
+        e.preventDefault();
+        insertMention(name);
+      };
+      dd.appendChild(item);
+    });
+    
+    dd.classList.remove("hidden");
+  }
+
+  function hideMentionDropdown() {
+    var dd = $("mention-dropdown");
+    if (dd) dd.className = "hidden";
+    currentMentions = [];
+    currentAtPos = -1;
+    mentionIndex = -1;
+  }
+
+  function insertMention(name) {
+    var ta = $("cv-text");
+    var val = ta.value;
+    var pos = ta.selectionStart;
+    var before = val.slice(0, currentAtPos);
+    var after = val.slice(pos);
+    
+    ta.value = before + "@" + name + " " + after;
+    hideMentionDropdown();
+    ta.focus();
+    var newCursor = currentAtPos + name.length + 2;
+    ta.setSelectionRange(newCursor, newCursor);
+    autoGrow(ta);
+  }
+
+  function handleMentionKeydown(e) {
+    var dd = $("mention-dropdown");
+    if (!dd || dd.classList.contains("hidden")) return;
+    
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      mentionIndex = (mentionIndex + 1) % currentMentions.length;
+      var ta = $("cv-text");
+      var val = ta.value;
+      var pos = ta.selectionStart;
+      var textBefore = val.slice(0, pos);
+      var lastAt = textBefore.lastIndexOf("@");
+      var queryText = textBefore.slice(lastAt + 1);
+      showMentionDropdown(queryText, lastAt);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      mentionIndex = (mentionIndex - 1 + currentMentions.length) % currentMentions.length;
+      var ta = $("cv-text");
+      var val = ta.value;
+      var pos = ta.selectionStart;
+      var textBefore = val.slice(0, pos);
+      var lastAt = textBefore.lastIndexOf("@");
+      var queryText = textBefore.slice(lastAt + 1);
+      showMentionDropdown(queryText, lastAt);
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      if (mentionIndex >= 0 && mentionIndex < currentMentions.length) {
+        e.preventDefault();
+        var u = currentMentions[mentionIndex];
+        var name = typeof u === "string" ? u : u.username;
+        insertMention(name);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      hideMentionDropdown();
+    }
+  }
+
   /* ============ BOOT ============ */
   function start(c){
     cfg=c;if(!cfg.user)cfg.user="admin";lsSet(KEY,JSON.stringify(c));
     initKeys(cfg.inst);
+    initMentionAutocomplete();
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
     $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.17)";
@@ -1921,6 +2117,38 @@
     if(!/^https?:\/\//.test(url)){err.textContent="Address must start with http:// or https://";err.classList.add("show");return;}
     if(!key){err.textContent="Enter the API key.";err.classList.add("show");return;}
     if(!inst){err.textContent="Enter the instance name.";err.classList.add("show");return;}
+    
+    var userPass=($("g-pass").value||"").trim();
+    var suffix="_"+inst.toLowerCase();
+    var instUKEY="naqd_gw_users_v2"+suffix;
+    var instUsers=[];
+    try{
+      var saved=JSON.parse(localStorage.getItem(instUKEY));
+      if(Array.isArray(saved)){
+        instUsers=saved.map(function(u){
+          if(typeof u==="string")return {username:u, password:""};
+          return u;
+        });
+      }
+    }catch(e){}
+    if(instUsers.length===0){
+      instUsers=[{username:"admin", password:""}];
+    }
+    var matchedUser=instUsers.filter(function(x){return x.username===user;})[0];
+    if(matchedUser){
+      if(matchedUser.password && matchedUser.password !== userPass){
+        err.textContent="Incorrect user password.";
+        err.classList.add("show");
+        return;
+      }
+    }else{
+      if(user!=="admin"){
+        err.textContent="User does not exist for this instance. Please contact admin.";
+        err.classList.add("show");
+        return;
+      }
+    }
+    
     err.classList.remove("show");$("g-go").textContent="Connecting…";$("g-go").disabled=true;
     cfg={url:url,key:key,inst:inst,user:user};
     api("GET","/instance/connectionState/"+encodeURIComponent(inst)).then(function(){start(cfg);})
@@ -1929,7 +2157,7 @@
         var m=(e2.status===401||e2.status===403)?"Key rejected — check the API key.":netMsg(e2);
         err.textContent=m;err.classList.add("show");});});
   };
-  ["g-url","g-key","g-inst","g-user"].forEach(function(id){$(id).addEventListener("keydown",function(e){if(e.key==="Enter")$("g-go").click();});});
+  ["g-url","g-key","g-inst","g-user","g-pass"].forEach(function(id){$(id).addEventListener("keydown",function(e){if(e.key==="Enter")$("g-go").click();});});
 
   /* ---- wires ---- */
   document.querySelectorAll(".nav-btn[data-view]").forEach(function(b){b.onclick=function(){setView(b.getAttribute("data-view"));};});
