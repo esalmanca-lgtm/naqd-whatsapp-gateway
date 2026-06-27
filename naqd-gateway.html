@@ -513,7 +513,17 @@
   var REFRESH_MS=15000;
   var cfg=null, view="messages", chatTab="chats", taskFilter="open";
   var chats=[], groups=[], tasks=[], active=null, msgCache={}, searchTerm="";
-  var mediaCache={}, lastSig={};
+  var mediaCache={}, lastSig={}, mediaKeys=[];
+  function cacheMedia(id, data) {
+    if (!mediaCache[id]) {
+      mediaKeys.push(id);
+      if (mediaKeys.length > 80) {
+        var oldest = mediaKeys.shift();
+        delete mediaCache[oldest];
+      }
+    }
+    mediaCache[id] = data;
+  }
   var dashTimer=null, deadline=0, convoPoll=null, listPoll=null, resolving={};
   var lidMap={};
   var failedLids={}, contactsMap={};
@@ -869,6 +879,7 @@
         if(!o.name)o.name=o.jid?jidNum(o.jid):k;
         return o;
       }).sort(function(a,b){return b.updatedAt-a.updatedAt;});
+      setTimeout(prefetchChatsInBackground, 1500);
       if(active){
         var found=chats.filter(function(x){return x.jid===active.jid || x.lid===active.jid || (x.lid && x.lid===active.lid);})[0];
         if(found){
@@ -1212,6 +1223,38 @@
       if(active && (active.jid === jid || active.lid === jid || (lid && (active.jid === lid || active.lid === lid))))$("cv-scroll").innerHTML='<div class="ml-empty">'+esc(netMsg(e))+'</div>';
     });
   }
+  function prefetchChatsInBackground() {
+    var topChats = chats.slice(0, 10);
+    var delay = 1000;
+    topChats.forEach(function(c) {
+      setTimeout(function() {
+        if (!active || active.jid !== c.jid) {
+          loadMessages(c, false).then(function() {
+            prefetchMediaForChat(c.jid);
+          }).catch(function(e){});
+        }
+      }, delay);
+      delay += 1800;
+    });
+  }
+  function prefetchMediaForChat(jid) {
+    var msgs = msgCache[jid] || [];
+    var recentMsgs = msgs.slice(-5);
+    recentMsgs.forEach(function(m) {
+      var id = m.key && m.key.id;
+      if (!id || mediaCache[id]) return;
+      var kind = msgKind(m);
+      if (kind === "image" || kind === "sticker" || kind === "audio" || kind === "video" || kind === "document") {
+        api("POST","/chat/getBase64FromMediaMessage/"+encodeURIComponent(cfg.inst),{message:m,convertToMp4:false})
+        .then(function(d){
+          if(!d||!d.base64) return;
+          var mime=((d.mimetype||"").split(";")[0])||(kind==="image"?"image/jpeg":kind==="audio"?"audio/ogg":kind==="video"?"video/mp4":"application/octet-stream");
+          var c={url:"data:"+mime+";base64,"+d.base64,mime:mime,fileName:d.fileName};
+          cacheMedia(id, c);
+        }).catch(function(e){});
+      }
+    });
+  }
   function unwrap(mm){
     if(!mm)return {};
     if(mm.ephemeralMessage&&mm.ephemeralMessage.message)return unwrap(mm.ephemeralMessage.message);
@@ -1384,7 +1427,7 @@
       if(!d||!d.base64)throw new Error("No media returned");
       var mime=((d.mimetype||"").split(";")[0])||(kind==="image"?"image/jpeg":kind==="audio"?"audio/ogg":kind==="video"?"video/mp4":"application/octet-stream");
       var c={url:"data:"+mime+";base64,"+d.base64,mime:mime,fileName:d.fileName};
-      mediaCache[id]=c;paint(c);
+      cacheMedia(id,c);paint(c);
     }).catch(function(e){
       var errMsg = "Couldn't load";
       if (e) {
