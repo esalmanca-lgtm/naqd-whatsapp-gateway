@@ -1097,20 +1097,36 @@
     var jid, lid=null;
     if(typeof target==="string"){
       jid=target;
-      var found=chats.filter(function(x){return x.jid===jid;})[0];
-      if(found)lid=found.lid;
+      var found=chats.filter(function(x){return x.jid===jid || (x.lid && x.lid===jid);})[0];
+      if(found){
+        if(found.jid===jid) lid=found.lid;
+        else lid=found.jid;
+      }
     }else{
       jid=target.jid;
       lid=target.lid;
     }
+    if(!lid){
+      if(jid.includes("@lid")){
+        lid=jidNum(jid)+"@s.whatsapp.net";
+      }else if(jid.includes("@s.whatsapp.net")){
+        lid=jidNum(jid)+"@lid";
+      }
+    }
     
-    var p1=api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:jid}},page:1,offset:100});
-    var p2=lid?api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:lid}},page:1,offset:100}):Promise.resolve([]);
+    var p1=api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:jid}},page:1,offset:100}).catch(function(e){
+      logLine("Err p1 query: "+e.message,"err");
+      return [];
+    });
+    var p2=lid?api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:lid}},page:1,offset:100}).catch(function(e){
+      logLine("Err p2 query: "+e.message,"err");
+      return [];
+    }):Promise.resolve([]);
     
     Promise.all([p1,p2]).then(function(results){
       var d1=results[0], d2=results[1];
-      var recs1=extractMessages(d1).filter(function(m){return m&&m.key&&m.key.remoteJid===jid;});
-      var recs2=lid?extractMessages(d2).filter(function(m){return m&&m.key&&m.key.remoteJid===lid;}):[];
+      var recs1=extractMessages(d1).filter(function(m){return m&&m.key&&(m.key.remoteJid===jid || (lid && m.key.remoteJid===lid));});
+      var recs2=lid?extractMessages(d2).filter(function(m){return m&&m.key&&(m.key.remoteJid===jid || m.key.remoteJid===lid);}):[];
       var recs=recs1.concat(recs2);
       var msgMap={};
       var uniqueRecs=[];
@@ -1191,9 +1207,9 @@
           }
         }
       }
-      if(active&&active.jid===jid)renderMessages(uniqueRecs,scroll);
+      if(active && (active.jid === jid || active.lid === jid || (lid && (active.jid === lid || active.lid === lid))))renderMessages(uniqueRecs,scroll);
     }).catch(function(e){
-      if(active&&active.jid===jid)$("cv-scroll").innerHTML='<div class="ml-empty">'+esc(netMsg(e))+'</div>';
+      if(active && (active.jid === jid || active.lid === jid || (lid && (active.jid === lid || active.lid === lid))))$("cv-scroll").innerHTML='<div class="ml-empty">'+esc(netMsg(e))+'</div>';
     });
   }
   function unwrap(mm){
