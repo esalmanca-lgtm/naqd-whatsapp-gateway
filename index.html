@@ -1941,24 +1941,6 @@
       html += '</div>';
     }
     html += '<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">';
-    html += '<label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Unreplied Response Alerter</label>';
-    
-    var alertEnabled = lsGet("naqd_gw_alert_enabled") === "true";
-    var alertTarget = lsGet("naqd_gw_alert_target") || "120363411366521608@g.us";
-    var alertOffice = lsGet("naqd_gw_alert_office") || "918848159581,919380525080,919778159581,919495849582,918136849582,919495739582";
-    var alertTimeout = lsGet("naqd_gw_alert_timeout") || "10";
-    
-    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;cursor:pointer">';
-    html += '<input type="checkbox" id="alert-enabled" ' + (alertEnabled ? 'checked' : '') + '> Enable response alerts</label>';
-    html += '<div class="field" style="margin-bottom:8px"><label>Intimation JID / Phone Number</label>';
-    html += '<input id="alert-target" class="input" placeholder="e.g. 120363411366521608@g.us" value="' + esc(alertTarget) + '"></div>';
-    html += '<div class="field" style="margin-bottom:8px"><label>Office Numbers (comma-separated)</label>';
-    html += '<textarea id="alert-office" class="input" rows="2" style="padding:7px 10px;font-size:13px;height:auto" placeholder="e.g. 918848159581,919380525080">' + esc(alertOffice) + '</textarea></div>';
-    html += '<div class="field" style="margin-bottom:8px"><label>Timeout (minutes)</label>';
-    html += '<input type="number" id="alert-timeout" class="input" value="' + esc(alertTimeout) + '"></div>';
-    html += '</div>';
-    
-    html += '<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">';
     html += '<label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Backup & Sync Config</label>';
     html += '<p class="sub" style="margin:-4px 0 8px">Copy this text to paste on another device, or paste a backup here to import.</p>';
     html += '<textarea id="sync-data-box" class="input mono" rows="3" style="font-size:11.5px;padding:8px" placeholder="Paste config JSON here to import"></textarea>';
@@ -1969,17 +1951,10 @@
     html += '</div>';
     html += '<div class="modal-actions" style="margin-top:20px;justify-content:space-between">';
     html += '<button class="btn danger" id="s-out">Sign out</button>';
-    html += '<button class="btn primary" id="s-close">Save & Close</button>';
+    html += '<button class="btn" id="s-close">Close</button>';
     html += '</div>';
     openModal(html);
-    $("s-close").onclick = function(){
-      lsSet("naqd_gw_alert_enabled", $("alert-enabled").checked ? "true" : "false");
-      lsSet("naqd_gw_alert_target", ($("alert-target").value || "").trim());
-      lsSet("naqd_gw_alert_office", ($("alert-office").value || "").trim());
-      lsSet("naqd_gw_alert_timeout", ($("alert-timeout").value || "").trim());
-      closeModal();
-      loadChats();
-    };
+    $("s-close").onclick = closeModal;
     $("s-out").onclick = function(){lsDel(KEY);location.reload();};
     $("btn-export-cfg").onclick = function(){
       var dataObj = {users: users, access: access, categories: categories, chatCategories: chatCategories, tasks: tasks};
@@ -2362,7 +2337,44 @@
     toast("Refreshing...");
     loadChats();
   };
-  $("btn-config-unreplied").onclick = settingsModal;
+  $("btn-config-unreplied").onclick = alerterSettingsModal;
+
+  function alerterSettingsModal(){
+    var html = '<h3>Response Alerter Settings</h3>';
+    html += '<p class="sub">Configure automated text alerts for unreplied client messages.</p>';
+    html += '<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">';
+    
+    var alertEnabled = lsGet("naqd_gw_alert_enabled") === "true";
+    var alertTarget = lsGet("naqd_gw_alert_target") || "120363411366521608@g.us";
+    var alertOffice = lsGet("naqd_gw_alert_office") || "918848159581,919380525080,919778159581,919495849582,918136849582,919495739582";
+    var alertTimeout = lsGet("naqd_gw_alert_timeout") || "10";
+    
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;cursor:pointer">';
+    html += '<input type="checkbox" id="alert-enabled" ' + (alertEnabled ? 'checked' : '') + '> Enable response alerts</label>';
+    html += '<div class="field" style="margin-bottom:8px"><label>Intimation JID / Phone Number</label>';
+    html += '<input id="alert-target" class="input" placeholder="e.g. 120363411366521608@g.us" value="' + esc(alertTarget) + '"></div>';
+    html += '<div class="field" style="margin-bottom:8px"><label>Office Numbers (comma-separated)</label>';
+    html += '<textarea id="alert-office" class="input" rows="3" style="padding:7px 10px;font-size:13px;height:auto" placeholder="e.g. 918848159581,919380525080">' + esc(alertOffice) + '</textarea></div>';
+    html += '<div class="field" style="margin-bottom:8px"><label>Timeout (minutes)</label>';
+    html += '<input type="number" id="alert-timeout" class="input" value="' + esc(alertTimeout) + '"></div>';
+    html += '</div>';
+    
+    html += '<div class="modal-actions" style="margin-top:20px;justify-content:flex-end;gap:8px">';
+    html += '<button class="btn" id="sa-cancel">Cancel</button>';
+    html += '<button class="btn primary" id="sa-save">Save & Close</button>';
+    html += '</div>';
+    
+    openModal(html);
+    $("sa-cancel").onclick = closeModal;
+    $("sa-save").onclick = function(){
+      lsSet("naqd_gw_alert_enabled", $("alert-enabled").checked ? "true" : "false");
+      lsSet("naqd_gw_alert_target", ($("alert-target").value || "").trim());
+      lsSet("naqd_gw_alert_office", ($("alert-office").value || "").trim());
+      lsSet("naqd_gw_alert_timeout", ($("alert-timeout").value || "").trim());
+      closeModal();
+      loadChats();
+    };
+  }
 
   function updateSidebarUnrepliedBadge() {
     var combined = chats.concat(groups);
