@@ -571,6 +571,57 @@
   var appStartupTime = Date.now();
   var cfg=null, view="messages", chatTab="chats", taskFilter="open";
   var chats=[], groups=[], tasks=[], active=null, msgCache={}, searchTerm="";
+  var db = {
+    dbName: "naqd_gateway_db",
+    dbVersion: 1,
+    instance: null,
+    init: function(cb) {
+      if (!window.indexedDB) return cb();
+      var req = indexedDB.open(db.dbName, db.dbVersion);
+      req.onupgradeneeded = function(e) {
+        var d = e.target.result;
+        if (!d.objectStoreNames.contains("state")) {
+          d.createObjectStore("state");
+        }
+      };
+      req.onsuccess = function(e) {
+        db.instance = e.target.result;
+        cb();
+      };
+      req.onerror = function() {
+        cb();
+      };
+    },
+    get: function(key, cb) {
+      if (!db.instance) return cb(null);
+      try {
+        var tx = db.instance.transaction("state", "readonly");
+        var store = tx.objectStore("state");
+        var req = store.get(key);
+        req.onsuccess = function() {
+          cb(req.result || null);
+        };
+        req.onerror = function() {
+          cb(null);
+        };
+      } catch(e) {
+        cb(null);
+      }
+    },
+    set: function(key, val, cb) {
+      if (!db.instance) return cb && cb();
+      try {
+        var tx = db.instance.transaction("state", "readwrite");
+        var store = tx.objectStore("state");
+        store.put(val, key);
+        tx.oncomplete = function() {
+          cb && cb();
+        };
+      } catch(e) {
+        cb && cb();
+      }
+    }
+  };
   var mediaCache={}, lastSig={}, mediaKeys=[];
   function cacheMedia(id, data) {
     if (!mediaCache[id]) {
@@ -1157,6 +1208,8 @@
         if(!o.name)o.name=o.jid?jidNum(o.jid):k;
         return o;
       }).sort(function(a,b){return b.updatedAt-a.updatedAt;});
+      db.set("chats", chats);
+      db.set("groups", groups);
       checkUnrepliedAlerts();
       setTimeout(prefetchChatsInBackground, 1500);
       if(active){
@@ -1406,6 +1459,17 @@
       }
     }
     
+    if (scroll) {
+      db.get("msg_" + jid, function(cachedMsgs) {
+        if (cachedMsgs && Array.isArray(cachedMsgs) && cachedMsgs.length > 0) {
+          msgCache[jid] = cachedMsgs;
+          if (active && (active.jid === jid || active.lid === jid)) {
+            renderMessages(cachedMsgs, true);
+          }
+        }
+      });
+    }
+    
     var p1=api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:jid}},page:1,offset:100}).catch(function(e){
       logLine("Err p1 query: "+e.message,"err");
       return [];
@@ -1473,6 +1537,7 @@
         }
       }
       msgCache[jid]=uniqueRecs;
+      db.set("msg_" + jid, uniqueRecs);
       var activeJids = chats.slice(0, 20).map(function(c){return c.jid;});
       for(var k in msgCache){
         if(activeJids.indexOf(k)===-1)delete msgCache[k];
@@ -2376,8 +2441,24 @@
     initDial();loadTasks();updateBadge();
     renderTabs();
     
-    loadVpsSettings(function() {
-      loadContactsList().then(loadChats);loadGroups();refreshDash();resetDial();
+    db.init(function() {
+      // Fetch cached data for instant initial rendering
+      db.get("chats", function(cachedChats) {
+        if (cachedChats && Array.isArray(cachedChats)) {
+          chats = cachedChats;
+          renderChatList();
+        }
+        db.get("groups", function(cachedGroups) {
+          if (cachedGroups && Array.isArray(cachedGroups)) {
+            groups = cachedGroups;
+            renderChatList();
+          }
+        });
+      });
+      
+      loadVpsSettings(function() {
+        loadContactsList().then(loadChats);loadGroups();refreshDash();resetDial();
+      });
     });
     
     setView("messages");
