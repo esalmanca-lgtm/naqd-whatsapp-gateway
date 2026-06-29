@@ -513,6 +513,7 @@
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
   var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1", MCKEY="naqd_gw_msgcache_v1", RKEY="naqd_gw_read_ids_v1";
   var REFRESH_MS=15000;
+  var appStartupTime = Date.now();
   var cfg=null, view="messages", chatTab="chats", taskFilter="open";
   var chats=[], groups=[], tasks=[], active=null, msgCache={}, searchTerm="";
   var mediaCache={}, lastSig={}, mediaKeys=[];
@@ -699,6 +700,97 @@
       }
     }
     return "";
+  }
+
+  /* ---- response monitor helpers ---- */
+  var alertedMsgIds = {};
+  try {
+    alertedMsgIds = JSON.parse(lsGet("naqd_gw_alerted_ids") || "{}");
+  } catch(e) {}
+
+  function isChatUnreplied(c) {
+    var lm = c.lastMessage || (c._raw && c._raw.lastMessage);
+    if (!lm || !lm.key) return false;
+    if (lm.key.fromMe) return false;
+    
+    var sender = jidNum(lm.key.participant || lm.key.remoteJid);
+    var officeStr = lsGet("naqd_gw_alert_office") || "";
+    var officeNums = officeStr.split(",").map(function(s){return s.trim();}).filter(Boolean);
+    if (officeNums.indexOf(sender) > -1) return false;
+    
+    var msgTimeMs = tsMs(lm.messageTimestamp);
+    if (msgTimeMs < appStartupTime) return false;
+    
+    var timeoutMins = parseInt(lsGet("naqd_gw_alert_timeout") || "10", 10);
+    if (isNaN(timeoutMins)) timeoutMins = 10;
+    var elapsed = Date.now() - msgTimeMs;
+    return elapsed >= (timeoutMins * 60 * 1000);
+  }
+
+  function checkUnrepliedAlerts() {
+    var enabled = lsGet("naqd_gw_alert_enabled") === "true";
+    if (!enabled) return;
+    
+    var target = (lsGet("naqd_gw_alert_target") || "").trim();
+    if (!target) return;
+    
+    var combined = chats.concat(groups);
+    var now = Date.now();
+    var timeoutMins = parseInt(lsGet("naqd_gw_alert_timeout") || "10", 10);
+    if (isNaN(timeoutMins)) timeoutMins = 10;
+    var timeoutMs = timeoutMins * 60 * 1000;
+    
+    var changed = false;
+    combined.forEach(function(c) {
+      var lm = c.lastMessage || (c._raw && c._raw.lastMessage);
+      if (!lm || !lm.key) return;
+      
+      var mid = lm.key.id;
+      if (alertedMsgIds[mid]) return;
+      if (lm.key.fromMe) return;
+      
+      var sender = jidNum(lm.key.participant || lm.key.remoteJid);
+      var officeStr = lsGet("naqd_gw_alert_office") || "";
+      var officeNums = officeStr.split(",").map(function(s){return s.trim();}).filter(Boolean);
+      if (officeNums.indexOf(sender) > -1) return;
+      
+      var msgTimeMs = tsMs(lm.messageTimestamp);
+      if (msgTimeMs < appStartupTime) return;
+      
+      var elapsed = now - msgTimeMs;
+      if (elapsed >= timeoutMs) {
+        var text = "⚠️ *Unreplied Chat Alert*\n*Chat:* " + (c.name || jidNum(c.jid)) + "\n*JID:* " + c.jid + "\nNo reply has been sent for over " + timeoutMins + " minutes!";
+        
+        var alertNumber = target;
+        if (alertNumber.length === 18 && !alertNumber.includes("@")) {
+          alertNumber += "@g.us";
+        }
+        
+        api("POST", "/message/sendText/" + encodeURIComponent(cfg.inst), {
+          number: alertNumber,
+          text: text
+        }).then(function() {
+          logLine("[Alerter] Sent alert to " + alertNumber + " for " + (c.name || jidNum(c.jid)), "ok");
+        }).catch(function(err) {
+          logLine("[Alerter] Failed to send alert: " + netMsg(err), "err");
+        });
+        
+        alertedMsgIds[mid] = true;
+        changed = true;
+      }
+    });
+    
+    if (changed) {
+      var keys = Object.keys(alertedMsgIds);
+      if (keys.length > 500) {
+        var newAlerted = {};
+        keys.slice(keys.length - 200).forEach(function(k) {
+          newAlerted[k] = true;
+        });
+        alertedMsgIds = newAlerted;
+      }
+      lsSet("naqd_gw_alerted_ids", JSON.stringify(alertedMsgIds));
+    }
   }
 
   /* ============ DASHBOARD ============ */
@@ -890,6 +982,7 @@
         if(!o.name)o.name=o.jid?jidNum(o.jid):k;
         return o;
       }).sort(function(a,b){return b.updatedAt-a.updatedAt;});
+      checkUnrepliedAlerts();
       setTimeout(prefetchChatsInBackground, 1500);
       if(active){
         var found=chats.filter(function(x){return x.jid===active.jid || x.lid===active.jid || (x.lid && x.lid===active.lid);})[0];
@@ -1005,7 +1098,8 @@
       if(b.updatedAt!==a.updatedAt)return b.updatedAt-a.updatedAt;
       return (a.name||"").localeCompare(b.name||"");
     });
-    if(chatTab==="groups")renderChatList();
+    checkUnrepliedAlerts();
+    if(chatTab==="groups" || chatTab==="unreplied")renderChatList();
   }
   function loadGroups(){
     api("GET","/group/fetchAllGroups/"+encodeURIComponent(cfg.inst)+"?getParticipants=false").then(function(d){
@@ -1028,6 +1122,9 @@
       src=chats;
     }else if(chatTab==="groups"){
       src=groups;
+    }else if(chatTab==="unreplied"){
+      var combined=chats.concat(groups);
+      src=combined.filter(isChatUnreplied);
     }else{
       var combined=chats.concat(groups);
       src=combined.filter(function(c){
@@ -1051,6 +1148,7 @@
     if(!list.length){
       var emptyText = "No chats yet.";
       if(chatTab==="groups")emptyText="No groups found.";
+      else if(chatTab==="unreplied")emptyText="No unreplied client messages.";
       else if(chatTab!=="chats")emptyText="No chats in " + chatTab + ".";
       box.innerHTML='<div class="ml-empty">'+emptyText+'</div>';
       return;
@@ -1690,7 +1788,7 @@
   function renderTabs(){
     var bar=$("tab-bar"); if(!bar)return;
     bar.innerHTML="";
-    var std=["chats","groups"];
+    var std=["chats","groups","unreplied"];
     std.forEach(function(t){
       var btn=el("button","tab"+(chatTab===t?" active":""));
       btn.textContent=t.charAt(0).toUpperCase()+t.slice(1);
@@ -1802,6 +1900,24 @@
       html += '</div>';
     }
     html += '<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">';
+    html += '<label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Unreplied Response Alerter</label>';
+    
+    var alertEnabled = lsGet("naqd_gw_alert_enabled") === "true";
+    var alertTarget = lsGet("naqd_gw_alert_target") || "120363411366521608@g.us";
+    var alertOffice = lsGet("naqd_gw_alert_office") || "918848159581,919380525080,919778159581,919495849582,918136849582,919495739582";
+    var alertTimeout = lsGet("naqd_gw_alert_timeout") || "10";
+    
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;cursor:pointer">';
+    html += '<input type="checkbox" id="alert-enabled" ' + (alertEnabled ? 'checked' : '') + '> Enable response alerts</label>';
+    html += '<div class="field" style="margin-bottom:8px"><label>Intimation JID / Phone Number</label>';
+    html += '<input id="alert-target" class="input" placeholder="e.g. 120363411366521608@g.us" value="' + esc(alertTarget) + '"></div>';
+    html += '<div class="field" style="margin-bottom:8px"><label>Office Numbers (comma-separated)</label>';
+    html += '<textarea id="alert-office" class="input" rows="2" style="padding:7px 10px;font-size:13px;height:auto" placeholder="e.g. 918848159581,919380525080">' + esc(alertOffice) + '</textarea></div>';
+    html += '<div class="field" style="margin-bottom:8px"><label>Timeout (minutes)</label>';
+    html += '<input type="number" id="alert-timeout" class="input" value="' + esc(alertTimeout) + '"></div>';
+    html += '</div>';
+    
+    html += '<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">';
     html += '<label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Backup & Sync Config</label>';
     html += '<p class="sub" style="margin:-4px 0 8px">Copy this text to paste on another device, or paste a backup here to import.</p>';
     html += '<textarea id="sync-data-box" class="input mono" rows="3" style="font-size:11.5px;padding:8px" placeholder="Paste config JSON here to import"></textarea>';
@@ -1815,7 +1931,14 @@
     html += '<button class="btn" id="s-close">Close</button>';
     html += '</div>';
     openModal(html);
-    $("s-close").onclick = closeModal;
+    $("s-close").onclick = function(){
+      lsSet("naqd_gw_alert_enabled", $("alert-enabled").checked ? "true" : "false");
+      lsSet("naqd_gw_alert_target", ($("alert-target").value || "").trim());
+      lsSet("naqd_gw_alert_office", ($("alert-office").value || "").trim());
+      lsSet("naqd_gw_alert_timeout", ($("alert-timeout").value || "").trim());
+      closeModal();
+      loadChats();
+    };
     $("s-out").onclick = function(){lsDel(KEY);location.reload();};
     $("btn-export-cfg").onclick = function(){
       var dataObj = {users: users, access: access, categories: categories, chatCategories: chatCategories, tasks: tasks};
