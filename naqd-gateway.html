@@ -829,10 +829,10 @@
         if (myNum && sender === myNum) return;
       }
       
-      var msgTimeMs = tsMs(lm.messageTimestamp);
-      if (msgTimeMs < appStartupTime) return;
-      
       var elapsed = now - msgTimeMs;
+      // Do not send alerts for messages older than 12 hours to avoid alerting on backlog
+      if (elapsed > (12 * 60 * 60 * 1000)) return;
+      
       if (elapsed >= timeoutMs) {
         var text = "⚠️ *Unreplied Chat Alert*\n*Chat:* " + (c.name || jidNum(c.jid)) + "\n*JID:* " + c.jid + "\nNo reply has been sent for over " + timeoutMins + " minutes!";
         
