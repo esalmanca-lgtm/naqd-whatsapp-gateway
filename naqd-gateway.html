@@ -1431,10 +1431,22 @@
     renderChatList();
     if(msgCache[c.jid] && msgCache[c.jid].length > 0){
       renderMessages(msgCache[c.jid],true);
+      loadMessages(c,true);
     } else {
-      $("cv-scroll").innerHTML='<div class="ml-loading">Loading messages…</div>';
+      db.get("msg_" + c.jid, function(cachedMsgs) {
+        if(cachedMsgs && Array.isArray(cachedMsgs) && cachedMsgs.length > 0) {
+          msgCache[c.jid] = cachedMsgs;
+          if (active && active.jid === c.jid) {
+            renderMessages(cachedMsgs, true);
+          }
+        } else {
+          if (active && active.jid === c.jid) {
+            $("cv-scroll").innerHTML='<div class="ml-loading">Loading messages…</div>';
+          }
+        }
+        loadMessages(c,true);
+      });
     }
-    loadMessages(c,true);
     if(convoPoll)clearInterval(convoPoll);
     convoPoll=setInterval(function(){if(!document.hidden&&view==="messages"&&active&&active.jid===c.jid)loadMessages(active,false);},9000);
   }
