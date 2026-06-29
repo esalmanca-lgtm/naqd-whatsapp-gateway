@@ -44,7 +44,7 @@ docker run -d \
   --name naqd-monitor \
   --restart always \
   -p 3000:3000 \
-  -v $(pwd)/vps-monitor/monitor_state.json:/app/monitor_state.json \
+  -v $(pwd)/vps-monitor/alert_state.json:/app/alert_state.json \
   --env-file vps-monitor/.env \
   naqd-monitor
 ```

@@ -9,7 +9,7 @@ const API_URL = process.env.API_URL || 'https://evo.naqd.in';
 const API_KEY = process.env.API_KEY || '93D6C0CFC14E-49C8-A8FC-C0300A29D250';
 const INSTANCE = process.env.INSTANCE || 'EXIM';
 
-const STATE_FILE = path.join(__dirname, 'monitor_state.json');
+const STATE_FILE = path.join(__dirname, 'alert_state.json');
 
 // Persistent settings config (loads from Env first, can be overridden by UI)
 let config = {
