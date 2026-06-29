@@ -535,6 +535,20 @@
           </div>
         </div>
       </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+        <div style="display:flex;gap:6px" id="unreplied-filter-tabs">
+          <button class="chip active" data-filter="all" style="padding:4px 12px;font-size:12.5px;height:28px">All</button>
+          <button class="chip" data-filter="chats" style="padding:4px 12px;font-size:12.5px;height:28px">Chats</button>
+          <button class="chip" data-filter="groups" style="padding:4px 12px;font-size:12.5px;height:28px">Groups</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:12.5px;color:var(--faint)">Sort:</span>
+          <select id="unreplied-sort" class="input" style="padding:2px 6px;font-size:12.5px;height:28px;width:auto;border-radius:4px;border:1px solid var(--line);background:var(--card)">
+            <option value="oldest">Oldest unreplied first</option>
+            <option value="newest">Newest unreplied first</option>
+          </select>
+        </div>
+      </div>
       <div id="unreplied-list-container" class="panel" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;border-radius:8px;border:1px solid var(--line)">
         <div id="unreplied-list" style="display:flex;flex-direction:column"></div>
       </div>
@@ -573,6 +587,7 @@
   var users=[{username:"admin", password:""}], access={}, categories=["Personal", "Exim", "Naqd"], chatCategories={};
   var readMessageIds={};
   var ownerJid = "";
+  var unrepliedFilter = "all", unrepliedSort = "oldest";
 
   function initKeys(inst){
     var suffix = "_" + inst.toLowerCase();
@@ -2343,8 +2358,8 @@
   renderTabs();
   $("task-assign-filter").onchange=renderTasks;
   $("cv-manage").onclick=function(){if(active)openManageChatModal(active);};
-  document.querySelectorAll(".chip").forEach(function(c){c.onclick=function(){
-    taskFilter=c.getAttribute("data-filter");document.querySelectorAll(".chip").forEach(function(x){x.classList.toggle("active",x===c);});
+  document.querySelectorAll(".tk-filters .chip").forEach(function(c){c.onclick=function(){
+    taskFilter=c.getAttribute("data-filter");document.querySelectorAll(".tk-filters .chip").forEach(function(x){x.classList.toggle("active",x===c);});
     renderTasks();};});
   $("chat-search").addEventListener("input",function(e){searchTerm=e.target.value.trim();renderChatList();});
   $("new-chat").onclick=newChatModal;
@@ -2375,6 +2390,21 @@
     loadChats();
   };
   $("btn-config-unreplied").onclick = alerterSettingsModal;
+
+  document.querySelectorAll("#unreplied-filter-tabs .chip").forEach(function(c) {
+    c.onclick = function() {
+      unrepliedFilter = c.getAttribute("data-filter");
+      document.querySelectorAll("#unreplied-filter-tabs .chip").forEach(function(x) {
+        x.classList.toggle("active", x === c);
+      });
+      renderUnrepliedView();
+    };
+  });
+
+  $("unreplied-sort").onchange = function() {
+    unrepliedSort = this.value;
+    renderUnrepliedView();
+  };
 
   function alerterSettingsModal(){
     var html = '<h3>Response Alerter Settings</h3>';
@@ -2449,8 +2479,24 @@
       badge.classList.toggle("hidden", unrepliedChats.length === 0);
     }
     
+    // Apply filter
+    if (unrepliedFilter === "chats") {
+      unrepliedChats = unrepliedChats.filter(function(c) { return !isGroupJid(c.jid); });
+    } else if (unrepliedFilter === "groups") {
+      unrepliedChats = unrepliedChats.filter(function(c) { return isGroupJid(c.jid); });
+    }
+
+    // Apply sort
+    unrepliedChats.sort(function(a, b) {
+      var lmA = a.lastMessage || (a._raw && a._raw.lastMessage);
+      var lmB = b.lastMessage || (b._raw && b._raw.lastMessage);
+      var tA = lmA ? tsMs(lmA.messageTimestamp) : 0;
+      var tB = lmB ? tsMs(lmB.messageTimestamp) : 0;
+      return unrepliedSort === "oldest" ? tA - tB : tB - tA;
+    });
+
     if (unrepliedChats.length === 0) {
-      listEl.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--faint);font-size:14.5px">No unreplied client messages at this time.</div>';
+      listEl.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--faint);font-size:14.5px">No unreplied chats matching the filter.</div>';
       return;
     }
     
