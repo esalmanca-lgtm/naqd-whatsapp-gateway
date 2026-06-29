@@ -2471,25 +2471,25 @@
   $("btn-config-unreplied").onclick = alerterSettingsModal;
   $("btn-report-unreplied").onclick = openSendReportModal;
 
-  function ensureHtml2Canvas(cb) {
-    if (window.html2canvas) {
+  function ensureJsPDF(cb) {
+    if (window.jspdf) {
       cb();
     } else {
-      toast("Loading image renderer...", "ok");
+      toast("Loading PDF generator...", "ok");
       var s = document.createElement("script");
-      s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
       s.onload = cb;
-      s.onerror = function() { toast("Failed to load image renderer", "err"); };
+      s.onerror = function() { toast("Failed to load PDF generator", "err"); };
       document.head.appendChild(s);
     }
   }
 
   function openSendReportModal() {
-    ensureHtml2Canvas(function() {
+    ensureJsPDF(function() {
       var alertTarget = lsGet("naqd_gw_alert_target") || "";
       
-      var html = '<h3>Send Overdue Response Report</h3>';
-      html += '<p class="sub">Select contacts or groups to send the report as an image.</p>';
+      var html = '<h3>Send Overdue Response Report (PDF)</h3>';
+      html += '<p class="sub">Select contacts or groups to send the full report in PDF format (sorted newest to oldest).</p>';
       
       html += '<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">';
       html += '<div class="field"><label>Search Contacts</label>';
@@ -2532,15 +2532,8 @@
       
       html += '<div class="modal-actions" style="margin-top:20px;justify-content:flex-end;gap:8px">';
       html += '<button class="btn" id="sr-cancel">Cancel</button>';
-      html += '<button class="btn primary" id="sr-send">Send Report (Image)</button>';
+      html += '<button class="btn primary" id="sr-send">Send Report (PDF)</button>';
       html += '</div>';
-      
-      var hiddenContainer = document.createElement("div");
-      hiddenContainer.id = "sr-hidden-report";
-      hiddenContainer.style.position = "absolute";
-      hiddenContainer.style.left = "-9999px";
-      hiddenContainer.style.top = "-9999px";
-      document.body.appendChild(hiddenContainer);
       
       openModal(html);
       
@@ -2552,10 +2545,7 @@
         });
       };
       
-      $("sr-cancel").onclick = function() {
-        closeModal();
-        hiddenContainer.remove();
-      };
+      $("sr-cancel").onclick = closeModal;
       
       $("sr-send").onclick = function() {
         var selectedJids = [];
@@ -2575,103 +2565,173 @@
           lateReplies = JSON.parse(lsGet("naqd_gw_late_replies") || "[]");
         } catch(e) {}
         
-        var listItemsHtml = "";
-        if (unrepliedChats.length === 0) {
-          listItemsHtml = '<div style="color:#94a3b8;font-size:13px;text-align:center;padding:12px 0;">No unreplied chats at this time.</div>';
-        } else {
-          var displayChats = unrepliedChats.slice(0, 10);
-          displayChats.forEach(function(c) {
-            var lm = c.lastMessage || (c._raw && c._raw.lastMessage);
-            var text = lm ? msgText(lm) : "[No messages]";
-            var elapsedMs = Date.now() - tsMs(lm ? lm.messageTimestamp : 0);
-            var elapsedMins = Math.floor(elapsedMs / (60 * 1000));
-            
-            listItemsHtml += '<div style="background:#1e293b;padding:8px 12px;border-radius:6px;border:1px solid #334155;display:flex;justify-content:space-between;align-items:center;">';
-            listItemsHtml += '  <div style="flex:1;min-width:0;margin-right:12px;">';
-            listItemsHtml += '    <div style="font-size:13px;font-weight:600;color:#f8fafc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(c.name || jidNum(c.jid)) + '</div>';
-            listItemsHtml += '    <div style="font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;">' + esc(text) + '</div>';
-            listItemsHtml += '  </div>';
-            listItemsHtml += '  <div style="font-size:11px;font-weight:600;color:#ef4444;background:rgba(239,68,68,0.15);padding:2px 6px;border-radius:4px;white-space:nowrap;">' + elapsedMins + 'm unreplied</div>';
-            listItemsHtml += '</div>';
-          });
-          if (unrepliedChats.length > 10) {
-            listItemsHtml += '<div style="color:#94a3b8;font-size:11px;text-align:center;margin-top:4px;">And ' + (unrepliedChats.length - 10) + ' more chats...</div>';
-          }
-        }
-        
-        var reportHtml = '';
-        reportHtml += '<div id="unreplied-report-card" style="width: 480px; padding: 20px; background: #0f172a; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, sans-serif; border-radius: 12px; box-sizing: border-box;">';
-        reportHtml += '  <div style="border-bottom: 1px solid #334155; padding-bottom: 10px; margin-bottom: 14px; display:flex; justify-content:space-between; align-items:center;">';
-        reportHtml += '    <div>';
-        reportHtml += '      <div style="font-size: 18px; font-weight: 700; color: #38bdf8; letter-spacing: 0.5px;">NAQD EXIM</div>';
-        reportHtml += '      <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Overdue Response Report</div>';
-        reportHtml += '    </div>';
-        reportHtml += '    <div style="text-align: right;">';
-        reportHtml += '      <div style="font-size: 10px; color: #94a3b8;">Generated At</div>';
-        reportHtml += '      <div style="font-size: 12px; font-weight: 500; color: #e2e8f0; margin-top: 2px;">' + nowStr + '</div>';
-        reportHtml += '    </div>';
-        reportHtml += '  </div>';
-        reportHtml += '  <div style="display: flex; gap: 12px; margin-bottom: 16px;">';
-        reportHtml += '    <div style="flex: 1; background: #1e293b; padding: 10px; border-radius: 8px; border: 1px solid #334155; text-align:center;">';
-        reportHtml += '      <div style="font-size: 20px; font-weight: 700; color: #ef4444;">' + unrepliedChats.length + '</div>';
-        reportHtml += '      <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">Awaiting Reply</div>';
-        reportHtml += '    </div>';
-        reportHtml += '    <div style="flex: 1; background: #1e293b; padding: 10px; border-radius: 8px; border: 1px solid #334155; text-align:center;">';
-        reportHtml += '      <div style="font-size: 20px; font-weight: 700; color: #10b981;">' + lateReplies.length + '</div>';
-        reportHtml += '      <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">Late Replies (Today)</div>';
-        reportHtml += '    </div>';
-        reportHtml += '  </div>';
-        reportHtml += '  <div style="font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Overdue Chats:</div>';
-        reportHtml += '  <div style="display:flex; flex-direction:column; gap:6px;">';
-        reportHtml +=      listItemsHtml;
-        reportHtml += '  </div>';
-        reportHtml += '  <div style="border-top: 1px solid #334155; margin-top: 16px; padding-top: 8px; text-align: center; font-size: 9px; color: #64748b;">';
-        reportHtml += '    Generated by Response Alerter';
-        reportHtml += '  </div>';
-        reportHtml += '</div>';
-        
-        hiddenContainer.innerHTML = reportHtml;
-        
-        toast("Rendering report image...");
+        toast("Generating PDF report...");
         closeModal();
         
         setTimeout(function() {
-          html2canvas(document.getElementById("unreplied-report-card"), {
-            backgroundColor: null,
-            scale: 2
-          }).then(function(canvas) {
-            var b64 = canvas.toDataURL("image/png").split(",")[1];
-            hiddenContainer.remove();
+          try {
+            var b64 = generatePDFReport(unrepliedChats, lateReplies, nowStr);
             
-            toast("Sending report image to " + selectedJids.length + " contacts...");
+            toast("Sending PDF report to " + selectedJids.length + " contacts...");
             
             var promises = selectedJids.map(function(targetJid) {
               var number = isGroupJid(targetJid) ? targetJid : jidNum(targetJid);
               var inst = encodeURIComponent(cfg.inst);
               return api("POST", "/message/sendMedia/" + inst, {
                 number: number,
-                mediatype: "image",
-                mimetype: "image/png",
+                mediatype: "document",
+                mimetype: "application/pdf",
                 media: b64,
-                fileName: "response_report.png",
-                caption: "⚠️ *Response Alerter Report* - " + nowStr
+                fileName: "response_report.pdf",
+                caption: "⚠️ *Response Alerter PDF Report* - " + nowStr
               });
             });
             
             Promise.all(promises).then(function() {
-              toast("Report sent successfully!", "ok");
+              toast("PDF Report sent successfully!", "ok");
             }).catch(function(err) {
-              toast("Failed to send report", "err");
+              toast("Failed to send PDF report", "err");
               logLine(netMsg(err), "err");
             });
-          }).catch(function(err) {
-            toast("Failed to generate image", "err");
+          } catch(err) {
+            toast("Failed to generate PDF", "err");
             logLine(err.message, "err");
-            hiddenContainer.remove();
-          });
+          }
         }, 100);
       };
     });
+  }
+
+  function generatePDFReport(unrepliedChats, lateReplies, nowStr) {
+    var { jsPDF } = window.jspdf;
+    var doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
+    
+    unrepliedChats.sort(function(a, b) {
+      var lmA = a.lastMessage || (a._raw && a._raw.lastMessage);
+      var lmB = b.lastMessage || (b._raw && b._raw.lastMessage);
+      var tA = lmA ? tsMs(lmA.messageTimestamp) : 0;
+      var tB = lmB ? tsMs(lmB.messageTimestamp) : 0;
+      return tB - tA;
+    });
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    doc.setTextColor(15, 23, 42);
+    doc.text("NAQD EXIM", 15, 20);
+    
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(100, 116, 139);
+    doc.text("Overdue Response Report", 15, 25);
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(71, 85, 105);
+    doc.text("Generated: " + nowStr, 130, 20);
+    
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.4);
+    doc.line(15, 28, 195, 28);
+    
+    doc.setFillColor(248, 250, 252);
+    doc.rect(15, 33, 85, 20, "F");
+    doc.rect(110, 33, 85, 20, "F");
+    doc.setDrawColor(226, 232, 240);
+    doc.rect(15, 33, 85, 20, "D");
+    doc.rect(110, 33, 85, 20, "D");
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(239, 68, 68);
+    doc.text(String(unrepliedChats.length), 22, 41);
+    doc.setTextColor(16, 185, 129);
+    doc.text(String(lateReplies.length), 117, 41);
+    
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text("Awaiting Reply (Overdue)", 22, 47);
+    doc.text("Late Replies (Today)", 117, 47);
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(15, 23, 42);
+    doc.text("OVERDUE CHATS (Newest to Oldest):", 15, 62);
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor(71, 85, 105);
+    doc.text("Chat Name", 16, 68);
+    doc.text("Last Message", 72, 68);
+    doc.text("Elapsed Time", 162, 68);
+    
+    doc.setDrawColor(15, 23, 42);
+    doc.line(15, 70, 195, 70);
+    
+    var y = 76;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(51, 65, 85);
+    
+    unrepliedChats.forEach(function(c, i) {
+      if (y > 272) {
+        doc.addPage();
+        y = 22;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.setTextColor(71, 85, 105);
+        doc.text("Chat Name", 16, y);
+        doc.text("Last Message", 72, y);
+        doc.text("Elapsed Time", 162, y);
+        doc.setDrawColor(15, 23, 42);
+        doc.line(15, y + 2, 195, y + 2);
+        y += 8;
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(51, 65, 85);
+      }
+      
+      var lm = c.lastMessage || (c._raw && c._raw.lastMessage);
+      var text = lm ? msgText(lm) : "[No messages]";
+      if (text.length > 50) text = text.substring(0, 47) + "...";
+      
+      var elapsedMs = Date.now() - tsMs(lm ? lm.messageTimestamp : 0);
+      var elapsedMins = Math.floor(elapsedMs / (60 * 1000));
+      var elapsedStr = elapsedMins + "m unreplied";
+      
+      var name = c.name || jidNum(c.jid);
+      if (name.length > 25) name = name.substring(0, 22) + "...";
+      
+      doc.text(name, 16, y);
+      doc.text(text, 72, y);
+      
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(220, 38, 38);
+      doc.text(elapsedStr, 162, y);
+      
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(51, 65, 85);
+      
+      doc.setDrawColor(241, 245, 249);
+      doc.line(15, y + 2, 195, y + 2);
+      y += 8;
+    });
+    
+    var pageCount = doc.internal.getNumberOfPages();
+    for (var i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184);
+      doc.text("Page " + i + " of " + pageCount, 95, 287);
+      doc.text("Generated by Response Alerter", 15, 287);
+    }
+    
+    return doc.output("datauristring").split(",")[1];
   }
 
   document.querySelectorAll("#unreplied-filter-tabs .chip").forEach(function(c) {
