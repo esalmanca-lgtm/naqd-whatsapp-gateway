@@ -2,6 +2,8 @@
 
 This is a lightweight Node.js background daemon designed to run 24/7 inside a Docker container on your VPS to monitor overdue client messages and send alerts automatically.
 
+It contains a built-in lightweight HTTP Server that **serves your Dashboard UI** and synchronizes configuration settings (e.g. timeout, target JIDs, format templates) dynamically.
+
 ## Quick Start on VPS via Git
 
 Since this folder is part of your repository, you don't need to copy-paste scripts. Just download the repository onto your VPS and build the container:
@@ -18,6 +20,7 @@ cd naqd-whatsapp-gateway/vps-monitor
 Create a `.env` file inside the `vps-monitor` directory to configure your credentials:
 ```bash
 cat << 'EOF' > .env
+PORT=3000
 API_URL=https://evo.naqd.in
 API_KEY=93D6C0CFC14E-49C8-A8FC-C0300A29D250
 INSTANCE=EXIM
@@ -35,22 +38,26 @@ docker build -t naqd-monitor .
 ```
 
 ### 4. Start the Container
-Run this command to start the container in the background (configured to always auto-restart and store compliance logs on the host VPS persistent disk):
+Run this command to start the container in the background (mapping port `3000` to access the dashboard and storing compliance logs on the host VPS persistent disk):
 ```bash
 docker run -d \
   --name naqd-monitor \
   --restart always \
+  -p 3000:3000 \
   -v $(pwd)/monitor_state.json:/app/monitor_state.json \
   --env-file .env \
   naqd-monitor
 ```
 
-### 5. Check logs & verify
+### 5. Access the UI
+Open your browser and navigate to:
+👉 **`http://YOUR_VPS_IP:3000`**
+
+From this page, you can monitor chats, view late reply compliance statistics, and edit your alert configurations. All changes made in the settings will instantly sync to the background monitor process!
+
+### 6. Check logs & verify
 Verify the container is running and watch the logs:
 ```bash
-# View running status
-docker ps
-
 # Stream logs
 docker logs -f naqd-monitor
 ```

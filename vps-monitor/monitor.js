@@ -1,17 +1,24 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 require('dotenv').config();
 
+const PORT = process.env.PORT || 3000;
 const API_URL = process.env.API_URL || 'https://evo.naqd.in';
 const API_KEY = process.env.API_KEY || '93D6C0CFC14E-49C8-A8FC-C0300A29D250';
 const INSTANCE = process.env.INSTANCE || 'EXIM';
-const TARGET_JID = process.env.TARGET_JID || '120363411366521608@g.us';
-const OFFICE_NUMBERS = process.env.OFFICE_NUMBERS || '918848159581,919380525080,919778159581,919495849582,918136849582,919495739582';
-const TIMEOUT_MINS = parseInt(process.env.TIMEOUT_MINS || '10', 10);
-const ALERT_FORMAT = process.env.ALERT_FORMAT || '⚠️ *Unreplied Chat Alert*\n*Chat:* {name}\n*JID:* {jid}\nNo reply has been sent for over {timeout} minutes!';
 
 const STATE_FILE = path.join(__dirname, 'monitor_state.json');
+
+// Persistent settings config (loads from Env first, can be overridden by UI)
+let config = {
+  alert_enabled: process.env.ALERT_ENABLED !== 'false',
+  alert_target: process.env.TARGET_JID || '120363411366521608@g.us',
+  alert_office: process.env.OFFICE_NUMBERS || '918848159581,919380525080,919778159581,919495849582,918136849582,919495739582',
+  alert_timeout: process.env.TIMEOUT_MINS || '10',
+  alert_format: process.env.ALERT_FORMAT || '⚠️ *Unreplied Chat Alert*\n*Chat:* {name}\n*JID:* {jid}\nNo reply has been sent for over {timeout} minutes!'
+};
 
 // State caches
 let alertedMsgIds = {};
@@ -27,16 +34,21 @@ function loadState() {
       activeUnreplied = data.activeUnreplied || {};
       lateReplies = data.lateReplies || [];
       ownerJid = data.ownerJid || '';
-      console.log(`[State] Loaded state from ${STATE_FILE}`);
+      
+      // Load saved settings if they exist in file
+      if (data.config) {
+        config = Object.assign({}, config, data.config);
+      }
+      console.log(`[State] Loaded state and config from ${STATE_FILE}`);
     } catch (e) {
-      console.error('[State] Failed to parse state file, using empty state:', e.message);
+      console.error('[State] Failed to parse state file, using default config:', e.message);
     }
   }
 }
 
 function saveState() {
   try {
-    const data = { alertedMsgIds, activeUnreplied, lateReplies, ownerJid };
+    const data = { alertedMsgIds, activeUnreplied, lateReplies, ownerJid, config };
     fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (e) {
     console.error('[State] Failed to save state file:', e.message);
@@ -95,7 +107,7 @@ function isChatUnreplied(c) {
   if (lm.key.fromMe) return false;
   
   const sender = getSenderPhone(lm);
-  const officeNums = OFFICE_NUMBERS.split(",").map(s => cleanJidPhone(s)).filter(Boolean);
+  const officeNums = config.alert_office.split(",").map(s => cleanJidPhone(s)).filter(Boolean);
   if (officeNums.indexOf(sender) > -1) return false;
   
   if (ownerJid) {
@@ -105,8 +117,9 @@ function isChatUnreplied(c) {
   
   const msgTimeMs = tsMs(lm.messageTimestamp);
   const elapsed = Date.now() - msgTimeMs;
+  const timeoutMins = parseInt(config.alert_timeout, 10) || 10;
   
-  return elapsed >= (TIMEOUT_MINS * 60 * 1000) && elapsed < (24 * 60 * 60 * 1000);
+  return elapsed >= (timeoutMins * 60 * 1000) && elapsed < (24 * 60 * 60 * 1000);
 }
 
 async function fetchOwnerJid() {
@@ -138,7 +151,8 @@ async function checkUnrepliedAlerts() {
     const list = res.data;
     const chats = Array.isArray(list) ? list : (list.records || list.chats || []);
     
-    const timeoutMs = TIMEOUT_MINS * 60 * 1000;
+    const timeoutMins = parseInt(config.alert_timeout, 10) || 10;
+    const timeoutMs = timeoutMins * 60 * 1000;
     const currentlyUnrepliedMap = {};
     
     chats.forEach(c => {
@@ -171,7 +185,7 @@ async function checkUnrepliedAlerts() {
           let isReplied = lm.key.fromMe;
           if (!isReplied) {
             const sender = getSenderPhone(lm);
-            const officeNums = OFFICE_NUMBERS.split(",").map(s => cleanJidPhone(s)).filter(Boolean);
+            const officeNums = config.alert_office.split(",").map(s => cleanJidPhone(s)).filter(Boolean);
             if (officeNums.indexOf(sender) > -1) isReplied = true;
             if (ownerJid && sender === cleanJidPhone(ownerJid)) isReplied = true;
           }
@@ -201,45 +215,48 @@ async function checkUnrepliedAlerts() {
       }
     });
     
+    // Alerts dispatcher
     let alertChanged = false;
-    for (const c of chats) {
-      if (isChatUnreplied(c)) {
-        const lm = c.lastMessage;
-        if (!lm || !lm.key) continue;
-        
-        const mid = lm.key.id;
-        if (alertedMsgIds[mid]) continue;
-        
-        const msgTimeMs = tsMs(lm.messageTimestamp);
-        const elapsed = Date.now() - msgTimeMs;
-        if (elapsed > (12 * 60 * 60 * 1000)) continue;
-        
-        if (elapsed >= timeoutMs) {
-          const name = c.name || c.pushName || cleanJidPhone(c.remoteJid || c.id);
-          const previewText = msgText(lm);
+    if (config.alert_enabled) {
+      for (const c of chats) {
+        if (isChatUnreplied(c)) {
+          const lm = c.lastMessage;
+          if (!lm || !lm.key) continue;
           
-          const text = ALERT_FORMAT
-            .replace(/{name}/g, name)
-            .replace(/{jid}/g, c.remoteJid || c.id)
-            .replace(/{timeout}/g, TIMEOUT_MINS)
-            .replace(/{preview}/g, previewText);
+          const mid = lm.key.id;
+          if (alertedMsgIds[mid]) continue;
+          
+          const msgTimeMs = tsMs(lm.messageTimestamp);
+          const elapsed = Date.now() - msgTimeMs;
+          if (elapsed > (12 * 60 * 60 * 1000)) continue;
+          
+          if (elapsed >= timeoutMs) {
+            const name = c.name || c.pushName || cleanJidPhone(c.remoteJid || c.id);
+            const previewText = msgText(lm);
             
-          let alertNumber = TARGET_JID;
-          if (alertNumber.length === 18 && !alertNumber.includes('@')) {
-            alertNumber += '@g.us';
-          }
-          
-          console.log(`[Alerter] Sending alert for chat ${name} to target ${alertNumber}...`);
-          try {
-            await api.post(`/message/sendText/${encodeURIComponent(INSTANCE)}`, {
-              number: alertNumber,
-              text: text
-            });
-            console.log(`[Alerter] Alert sent successfully!`);
-            alertedMsgIds[mid] = true;
-            alertChanged = true;
-          } catch (err) {
-            console.error(`[Alerter] Failed to send alert: ${err.message}`);
+            const text = config.alert_format
+              .replace(/{name}/g, name)
+              .replace(/{jid}/g, c.remoteJid || c.id)
+              .replace(/{timeout}/g, timeoutMins)
+              .replace(/{preview}/g, previewText);
+              
+            let alertNumber = config.alert_target;
+            if (alertNumber.length === 18 && !alertNumber.includes('@')) {
+              alertNumber += '@g.us';
+            }
+            
+            console.log(`[Alerter] Sending alert for chat ${name} to target ${alertNumber}...`);
+            try {
+              await api.post(`/message/sendText/${encodeURIComponent(INSTANCE)}`, {
+                number: alertNumber,
+                text: text
+              });
+              console.log(`[Alerter] Alert sent successfully!`);
+              alertedMsgIds[mid] = true;
+              alertChanged = true;
+            } catch (err) {
+              console.error(`[Alerter] Failed to send alert: ${err.message}`);
+            }
           }
         }
       }
@@ -261,13 +278,65 @@ async function checkUnrepliedAlerts() {
   }
 }
 
+// REST HTTP server implementation for VPS serving dashboard & settings API
+const server = http.createServer((req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
+
+  const url = req.url;
+
+  if (url === '/api/settings' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(config));
+  } else if (url === '/api/settings' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        if (data.alert_enabled !== undefined) config.alert_enabled = (data.alert_enabled === 'true' || data.alert_enabled === true);
+        if (data.alert_target !== undefined) config.alert_target = data.alert_target;
+        if (data.alert_office !== undefined) config.alert_office = data.alert_office;
+        if (data.alert_timeout !== undefined) config.alert_timeout = String(data.alert_timeout);
+        if (data.alert_format !== undefined) config.alert_format = data.alert_format;
+        
+        saveState();
+        console.log(`[Config] Settings updated via Web UI.`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok', config }));
+      } catch (e) {
+        res.writeHead(400);
+        res.end('Invalid JSON');
+      }
+    });
+  } else if (url === '/' || url === '/index.html' || url === '/naqd-gateway.html') {
+    const fileName = (url === '/' || url === '/index.html') ? 'index.html' : 'naqd-gateway.html';
+    const filePath = path.join(__dirname, '..', fileName);
+    if (fs.existsSync(filePath)) {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(fs.readFileSync(filePath));
+    } else {
+      res.writeHead(404);
+      res.end('Dashboard HTML Not Found');
+    }
+  } else {
+    res.writeHead(404);
+    res.end('Not Found');
+  }
+});
+
 console.log('================================================');
 console.log('   NAQD WHATSAPP RESPONSE MONITOR DAEMON        ');
 console.log('================================================');
 console.log(`API URL:      ${API_URL}`);
 console.log(`Instance:     ${INSTANCE}`);
-console.log(`Target JID:   ${TARGET_JID}`);
-console.log(`Timeout:      ${TIMEOUT_MINS} minutes`);
 console.log('------------------------------------------------');
 
 loadState();
@@ -275,4 +344,8 @@ loadState();
 fetchOwnerJid().then(() => {
   checkUnrepliedAlerts();
   setInterval(checkUnrepliedAlerts, 30000);
+  
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`[Web] Dashboard & Settings API live on port ${PORT}`);
+  });
 });
