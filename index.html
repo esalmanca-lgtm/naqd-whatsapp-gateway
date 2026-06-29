@@ -2375,7 +2375,11 @@
     var ub=$("inst-user-badge");if(ub)ub.textContent=cfg.user;
     initDial();loadTasks();updateBadge();
     renderTabs();
-    loadContactsList().then(loadChats);loadGroups();refreshDash();resetDial();
+    
+    loadVpsSettings(function() {
+      loadContactsList().then(loadChats);loadGroups();refreshDash();resetDial();
+    });
+    
     setView("messages");
     // refresh chat list periodically
     if(listPoll)clearInterval(listPoll);
