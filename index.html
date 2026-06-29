@@ -1415,7 +1415,7 @@
       return [];
     }):Promise.resolve([]);
     
-    Promise.all([p1,p2]).then(function(results){
+    return Promise.all([p1,p2]).then(function(results){
       var d1=results[0], d2=results[1];
       var recs1=extractMessages(d1).filter(function(m){return m&&m.key&&(m.key.remoteJid===jid || (lid && m.key.remoteJid===lid));});
       var recs2=lid?extractMessages(d2).filter(function(m){return m&&m.key&&(m.key.remoteJid===jid || m.key.remoteJid===lid);}):[];
