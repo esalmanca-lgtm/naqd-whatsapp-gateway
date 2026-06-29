@@ -1628,13 +1628,20 @@
       if (!id || mediaCache[id]) return;
       var kind = msgKind(m);
       if (kind === "image" || kind === "sticker" || kind === "audio" || kind === "video" || kind === "document") {
-        api("POST","/chat/getBase64FromMediaMessage/"+encodeURIComponent(cfg.inst),{message:m,convertToMp4:false})
-        .then(function(d){
-          if(!d||!d.base64) return;
-          var mime=((d.mimetype||"").split(";")[0])||(kind==="image"?"image/jpeg":kind==="audio"?"audio/ogg":kind==="video"?"video/mp4":"application/octet-stream");
-          var c={url:"data:"+mime+";base64,"+d.base64,mime:mime,fileName:d.fileName};
-          cacheMedia(id, c);
-        }).catch(function(e){});
+        db.get("media_" + id, function(cachedMedia) {
+          if (cachedMedia) {
+            mediaCache[id] = cachedMedia;
+            return;
+          }
+          api("POST","/chat/getBase64FromMediaMessage/"+encodeURIComponent(cfg.inst),{message:m,convertToMp4:false})
+          .then(function(d){
+            if(!d||!d.base64) return;
+            var mime=((d.mimetype||"").split(";")[0])||(kind==="image"?"image/jpeg":kind==="audio"?"audio/ogg":kind==="video"?"video/mp4":"application/octet-stream");
+            var c={url:"data:"+mime+";base64,"+d.base64,mime:mime,fileName:d.fileName};
+            cacheMedia(id, c);
+            db.set("media_" + id, c);
+          }).catch(function(e){});
+        });
       }
     });
   }
@@ -1804,29 +1811,38 @@
       }
     }
     if(mediaCache[id]){paint(mediaCache[id]);return;}
-    slot.innerHTML='<div class="media-load">Loading…</div>';
-    api("POST","/chat/getBase64FromMediaMessage/"+encodeURIComponent(cfg.inst),{message:m,convertToMp4:false})
-    .then(function(d){
-      if(!d||!d.base64)throw new Error("No media returned");
-      var mime=((d.mimetype||"").split(";")[0])||(kind==="image"?"image/jpeg":kind==="audio"?"audio/ogg":kind==="video"?"video/mp4":"application/octet-stream");
-      var c={url:"data:"+mime+";base64,"+d.base64,mime:mime,fileName:d.fileName};
-      cacheMedia(id,c);paint(c);
-    }).catch(function(e){
-      var errMsg = "Couldn't load";
-      if (e) {
-        var msg = (e.message || "").toLowerCase();
-        if (msg.includes("failed to fetch stream") || msg.includes("fetch stream") || msg.includes("stream")) {
-          errMsg = "Media expired/unavailable";
-        } else if (e.status === 404) {
-          errMsg = "Media not found";
-        } else if (e.status === 504 || e.status === 502 || msg.includes("timeout")) {
-          errMsg = "Server timeout";
-        } else if (e.message && e.message.length < 30 && !e.message.includes("http")) {
-          errMsg = e.message;
-        }
+    db.get("media_" + id, function(cachedMedia) {
+      if(cachedMedia) {
+        mediaCache[id] = cachedMedia;
+        paint(cachedMedia);
+        return;
       }
-      slot.innerHTML="";var rb=el("button","media-retry");rb.textContent=errMsg+" — retry";
-      rb.onclick=function(){ensureMedia(m,slot,kind);};slot.appendChild(rb);
+      slot.innerHTML='<div class="media-load">Loading…</div>';
+      api("POST","/chat/getBase64FromMediaMessage/"+encodeURIComponent(cfg.inst),{message:m,convertToMp4:false})
+      .then(function(d){
+        if(!d||!d.base64)throw new Error("No media returned");
+        var mime=((d.mimetype||"").split(";")[0])||(kind==="image"?"image/jpeg":kind==="audio"?"audio/ogg":kind==="video"?"video/mp4":"application/octet-stream");
+        var c={url:"data:"+mime+";base64,"+d.base64,mime:mime,fileName:d.fileName};
+        cacheMedia(id,c);
+        db.set("media_" + id, c);
+        paint(c);
+      }).catch(function(e){
+        var errMsg = "Couldn't load";
+        if (e) {
+          var msg = (e.message || "").toLowerCase();
+          if (msg.includes("failed to fetch stream") || msg.includes("fetch stream") || msg.includes("stream")) {
+            errMsg = "Media expired/unavailable";
+          } else if (e.status === 404) {
+            errMsg = "Media not found";
+          } else if (e.status === 504 || e.status === 502 || msg.includes("timeout")) {
+            errMsg = "Server timeout";
+          } else if (e.message && e.message.length < 30 && !e.message.includes("http")) {
+            errMsg = e.message;
+          }
+        }
+        slot.innerHTML="";var rb=el("button","media-retry");rb.textContent=errMsg+" — retry";
+        rb.onclick=function(){ensureMedia(m,slot,kind);};slot.appendChild(rb);
+      });
     });
   }
   function dayLabel(d){
