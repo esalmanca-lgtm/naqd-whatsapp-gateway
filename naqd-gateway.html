@@ -762,9 +762,9 @@
     var isGroup = remoteJid.indexOf("@g.us") > -1;
     var senderJid = "";
     if (isGroup) {
-      senderJid = lm.participant || (lm.key && lm.key.participant) || "";
+      senderJid = (lm.key && lm.key.participantAlt) || lm.participantAlt || lm.participant || (lm.key && lm.key.participant) || "";
     } else {
-      senderJid = remoteJid;
+      senderJid = (lm.key && lm.key.remoteJidAlt) || (lm.key && lm.key.participantAlt) || lm.participantAlt || remoteJid;
     }
     return cleanJidPhone(senderJid);
   }
