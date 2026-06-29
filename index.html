@@ -572,6 +572,7 @@
   var chatsGroups=[], apiGroups=[], highlightMsgId=null;
   var users=[{username:"admin", password:""}], access={}, categories=["Personal", "Exim", "Naqd"], chatCategories={};
   var readMessageIds={};
+  var ownerJid = "";
 
   function initKeys(inst){
     var suffix = "_" + inst.toLowerCase();
@@ -747,15 +748,28 @@
     alertedMsgIds = JSON.parse(lsGet("naqd_gw_alerted_ids") || "{}");
   } catch(e) {}
 
+  function cleanJidPhone(j) {
+    if (!j) return "";
+    var raw = String(j).split("@")[0];
+    var base = raw.split(":")[0];
+    var clean = base.split(".")[0];
+    return clean.replace(/[^0-9]/g, "");
+  }
+
   function isChatUnreplied(c) {
     var lm = c.lastMessage || (c._raw && c._raw.lastMessage);
     if (!lm || !lm.key) return false;
     if (lm.key.fromMe) return false;
     
-    var sender = jidNum(lm.key.participant || lm.key.remoteJid);
+    var sender = cleanJidPhone(lm.key.participant || lm.key.remoteJid);
     var officeStr = lsGet("naqd_gw_alert_office") || "";
-    var officeNums = officeStr.split(",").map(function(s){return s.trim();}).filter(Boolean);
+    var officeNums = officeStr.split(",").map(function(s){return cleanJidPhone(s);}).filter(Boolean);
     if (officeNums.indexOf(sender) > -1) return false;
+    
+    if (ownerJid) {
+      var myNum = cleanJidPhone(ownerJid);
+      if (myNum && sender === myNum) return false;
+    }
     
     var msgTimeMs = tsMs(lm.messageTimestamp);
     var elapsed = Date.now() - msgTimeMs;
@@ -792,10 +806,15 @@
       if (alertedMsgIds[mid]) return;
       if (lm.key.fromMe) return;
       
-      var sender = jidNum(lm.key.participant || lm.key.remoteJid);
+      var sender = cleanJidPhone(lm.key.participant || lm.key.remoteJid);
       var officeStr = lsGet("naqd_gw_alert_office") || "";
-      var officeNums = officeStr.split(",").map(function(s){return s.trim();}).filter(Boolean);
+      var officeNums = officeStr.split(",").map(function(s){return cleanJidPhone(s);}).filter(Boolean);
       if (officeNums.indexOf(sender) > -1) return;
+      
+      if (ownerJid) {
+        var myNum = cleanJidPhone(ownerJid);
+        if (myNum && sender === myNum) return;
+      }
       
       var msgTimeMs = tsMs(lm.messageTimestamp);
       if (msgTimeMs < appStartupTime) return;
@@ -850,6 +869,7 @@
   function applyInstance(inst){
     var x=inst&&inst.instance?inst.instance:inst||{};
     var name=pick(x,["name","instanceName"])||cfg.inst, owner=pick(x,["ownerJid","owner"]);
+    if (owner) ownerJid = String(owner);
     var profile=pick(x,["profileName"]), state=pick(x,["connectionStatus","state","status"]), c=x._count||{};
     $("inst-name").textContent=name;
     var sub=[];if(profile)sub.push(profile);if(owner)sub.push(jidNum(String(owner)));
