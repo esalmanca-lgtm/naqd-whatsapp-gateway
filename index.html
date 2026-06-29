@@ -515,6 +515,7 @@
           <p style="margin:4px 0 0;font-size:13px;color:var(--faint)">Chats unreplied by office numbers for more than 10 minutes</p>
         </div>
         <div style="display:flex;gap:8px">
+          <button class="btn" id="btn-report-unreplied" style="padding:0 12px;height:34px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;margin-right:6px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>Send Report</button>
           <button class="btn" id="btn-refresh-unreplied" style="padding:0 12px;height:34px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;margin-right:6px"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Refresh</button>
           <button class="btn primary" id="btn-config-unreplied" style="padding:0 12px;height:34px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;margin-right:6px"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</button>
         </div>
@@ -540,6 +541,7 @@
           <button class="chip active" data-filter="all" style="padding:4px 12px;font-size:12.5px;height:28px">All</button>
           <button class="chip" data-filter="chats" style="padding:4px 12px;font-size:12.5px;height:28px">Chats</button>
           <button class="chip" data-filter="groups" style="padding:4px 12px;font-size:12.5px;height:28px">Groups</button>
+          <button class="chip" data-filter="late" style="padding:4px 12px;font-size:12.5px;height:28px;border-color:var(--up);color:var(--up)">Late Replies</button>
         </div>
         <div style="display:flex;align-items:center;gap:6px">
           <span style="font-size:12.5px;color:var(--faint)">Sort:</span>
@@ -813,22 +815,93 @@
       renderUnrepliedView();
     }
 
+    var combined = chats.concat(groups);
+    var now = Date.now();
+    var timeoutMins = parseInt(lsGet("naqd_gw_alert_timeout") || "10", 10);
+    if (isNaN(timeoutMins)) timeoutMins = 10;
+    var timeoutMs = timeoutMins * 60 * 1000;
+
+    // Track active unreplied state and detect late replies
+    var activeUnreplied = {};
+    try {
+      activeUnreplied = JSON.parse(lsGet("naqd_gw_active_unreplied") || "{}");
+    } catch(e) {}
+    
+    var lateReplies = [];
+    try {
+      lateReplies = JSON.parse(lsGet("naqd_gw_late_replies") || "[]");
+    } catch(e) {}
+
+    var currentlyUnrepliedMap = {};
+    combined.forEach(function(c) {
+      if (isChatUnreplied(c)) {
+        var lm = c.lastMessage || (c._raw && c._raw.lastMessage);
+        if (lm && lm.key) {
+          currentlyUnrepliedMap[c.jid] = true;
+          if (!activeUnreplied[c.jid] || activeUnreplied[c.jid].msgId !== lm.key.id) {
+            activeUnreplied[c.jid] = {
+              msgId: lm.key.id,
+              clientTime: tsMs(lm.messageTimestamp),
+              name: c.name || jidNum(c.jid),
+              text: msgText(lm)
+            };
+          }
+        }
+      }
+    });
+
+    var activeJids = Object.keys(activeUnreplied);
+    activeJids.forEach(function(jid) {
+      if (!currentlyUnrepliedMap[jid]) {
+        var c = combined.find(function(x) { return x.jid === jid; });
+        if (c) {
+          var lm = c.lastMessage || (c._raw && c._raw.lastMessage);
+          if (lm && lm.key) {
+            var isReplied = lm.key.fromMe;
+            if (!isReplied) {
+              var sender = getSenderPhone(lm);
+              var officeStr = lsGet("naqd_gw_alert_office") || "";
+              var officeNums = officeStr.split(",").map(function(s){return cleanJidPhone(s);}).filter(Boolean);
+              if (officeNums.indexOf(sender) > -1) isReplied = true;
+              if (ownerJid && sender === cleanJidPhone(ownerJid)) isReplied = true;
+            }
+            if (isReplied) {
+              var replyTime = tsMs(lm.messageTimestamp);
+              var clientTime = activeUnreplied[jid].clientTime;
+              var elapsed = replyTime - clientTime;
+              if (elapsed >= timeoutMs) {
+                lateReplies.unshift({
+                  jid: jid,
+                  name: activeUnreplied[jid].name,
+                  clientMsg: activeUnreplied[jid].text,
+                  clientTime: clientTime,
+                  replyTime: replyTime,
+                  elapsedMins: Math.floor(elapsed / 60000),
+                  repliedBy: lm.key.fromMe ? "Gateway" : getSenderPhone(lm)
+                });
+              }
+            }
+          }
+        }
+        delete activeUnreplied[jid];
+      }
+    });
+
+    lsSet("naqd_gw_active_unreplied", JSON.stringify(activeUnreplied));
+    lsSet("naqd_gw_late_replies", JSON.stringify(lateReplies));
+
+    // Automated text notification sender
     var enabled = lsGet("naqd_gw_alert_enabled") === "true";
     if (!enabled) return;
     
     var target = (lsGet("naqd_gw_alert_target") || "").trim();
     if (!target) return;
     
+    var alertedMsgIds = {};
     try {
       alertedMsgIds = JSON.parse(lsGet("naqd_gw_alerted_ids") || "{}");
     } catch(e) {}
-    
-    var combined = chats.concat(groups);
-    var now = Date.now();
-    var timeoutMins = parseInt(lsGet("naqd_gw_alert_timeout") || "10", 10);
-    if (isNaN(timeoutMins)) timeoutMins = 10;
-    var timeoutMs = timeoutMins * 60 * 1000;
-    
+
     var changed = false;
     combined.forEach(function(c) {
       var lm = c.lastMessage || (c._raw && c._raw.lastMessage);
@@ -874,7 +947,7 @@
         changed = true;
       }
     });
-    
+
     if (changed) {
       var keys = Object.keys(alertedMsgIds);
       if (keys.length > 500) {
@@ -2390,6 +2463,210 @@
     loadChats();
   };
   $("btn-config-unreplied").onclick = alerterSettingsModal;
+  $("btn-report-unreplied").onclick = openSendReportModal;
+
+  function ensureHtml2Canvas(cb) {
+    if (window.html2canvas) {
+      cb();
+    } else {
+      toast("Loading image renderer...", "ok");
+      var s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+      s.onload = cb;
+      s.onerror = function() { toast("Failed to load image renderer", "err"); };
+      document.head.appendChild(s);
+    }
+  }
+
+  function openSendReportModal() {
+    ensureHtml2Canvas(function() {
+      var alertTarget = lsGet("naqd_gw_alert_target") || "";
+      
+      var html = '<h3>Send Overdue Response Report</h3>';
+      html += '<p class="sub">Select contacts or groups to send the report as an image.</p>';
+      
+      html += '<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">';
+      html += '<div class="field"><label>Search Contacts</label>';
+      html += '<input id="sr-search" class="input" placeholder="Search chats or groups..." style="height:32px;margin-bottom:8px"></div>';
+      
+      html += '<div class="field"><label>Select Contacts (Check to select)</label>';
+      html += '<div id="sr-contacts-list" style="max-height:200px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;background:var(--card)">';
+      
+      var allRecipients = [];
+      groups.forEach(function(g) {
+        allRecipients.push({ jid: g.jid, name: g.name || "Group", isGroup: true });
+      });
+      chats.forEach(function(c) {
+        allRecipients.push({ jid: c.jid, name: c.name || jidNum(c.jid), isGroup: false });
+      });
+      
+      allRecipients.sort(function(a, b) { return a.name.localeCompare(b.name); });
+      
+      if (alertTarget) {
+        var idx = -1;
+        for (var i=0; i<allRecipients.length; i++) {
+          if (allRecipients[i].jid === alertTarget) { idx = i; break; }
+        }
+        if (idx > -1) {
+          var targetItem = allRecipients.splice(idx, 1)[0];
+          allRecipients.unshift(targetItem);
+        } else {
+          allRecipients.unshift({ jid: alertTarget, name: "Target Alert Group/JID", isGroup: alertTarget.indexOf("@g.us") > -1 });
+        }
+      }
+      
+      allRecipients.forEach(function(r, idx) {
+        var isChecked = (r.jid === alertTarget) ? 'checked' : '';
+        html += '<label class="sr-recipient-row" data-name="' + esc(r.name.toLowerCase()) + '" style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px;cursor:pointer">';
+        html += '<input type="checkbox" class="sr-recipient-cb" value="' + esc(r.jid) + '" ' + isChecked + '>';
+        html += '<span>' + esc(r.name) + ' <span style="font-size:11px;color:var(--faint)">(' + (r.isGroup ? 'Group' : 'Chat') + ')</span></span></label>';
+      });
+      
+      html += '</div></div></div>';
+      
+      html += '<div class="modal-actions" style="margin-top:20px;justify-content:flex-end;gap:8px">';
+      html += '<button class="btn" id="sr-cancel">Cancel</button>';
+      html += '<button class="btn primary" id="sr-send">Send Report (Image)</button>';
+      html += '</div>';
+      
+      var hiddenContainer = document.createElement("div");
+      hiddenContainer.id = "sr-hidden-report";
+      hiddenContainer.style.position = "absolute";
+      hiddenContainer.style.left = "-9999px";
+      hiddenContainer.style.top = "-9999px";
+      document.body.appendChild(hiddenContainer);
+      
+      openModal(html);
+      
+      $("sr-search").oninput = function() {
+        var q = this.value.trim().toLowerCase();
+        document.querySelectorAll(".sr-recipient-row").forEach(function(row) {
+          var name = row.getAttribute("data-name");
+          row.style.display = (!q || name.indexOf(q) > -1) ? "flex" : "none";
+        });
+      };
+      
+      $("sr-cancel").onclick = function() {
+        closeModal();
+        hiddenContainer.remove();
+      };
+      
+      $("sr-send").onclick = function() {
+        var selectedJids = [];
+        document.querySelectorAll(".sr-recipient-cb:checked").forEach(function(cb) {
+          selectedJids.push(cb.value);
+        });
+        
+        if (selectedJids.length === 0) {
+          toast("Please select at least one contact", "err");
+          return;
+        }
+        
+        var nowStr = formatChatTime(new Date());
+        var unrepliedChats = (chats.concat(groups)).filter(isChatUnreplied);
+        var lateReplies = [];
+        try {
+          lateReplies = JSON.parse(lsGet("naqd_gw_late_replies") || "[]");
+        } catch(e) {}
+        
+        var listItemsHtml = "";
+        if (unrepliedChats.length === 0) {
+          listItemsHtml = '<div style="color:#94a3b8;font-size:13px;text-align:center;padding:12px 0;">No unreplied chats at this time.</div>';
+        } else {
+          var displayChats = unrepliedChats.slice(0, 10);
+          displayChats.forEach(function(c) {
+            var lm = c.lastMessage || (c._raw && c._raw.lastMessage);
+            var text = lm ? msgText(lm) : "[No messages]";
+            var elapsedMs = Date.now() - tsMs(lm ? lm.messageTimestamp : 0);
+            var elapsedMins = Math.floor(elapsedMs / (60 * 1000));
+            
+            listItemsHtml += '<div style="background:#1e293b;padding:8px 12px;border-radius:6px;border:1px solid #334155;display:flex;justify-content:space-between;align-items:center;">';
+            listItemsHtml += '  <div style="flex:1;min-width:0;margin-right:12px;">';
+            listItemsHtml += '    <div style="font-size:13px;font-weight:600;color:#f8fafc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(c.name || jidNum(c.jid)) + '</div>';
+            listItemsHtml += '    <div style="font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;">' + esc(text) + '</div>';
+            listItemsHtml += '  </div>';
+            listItemsHtml += '  <div style="font-size:11px;font-weight:600;color:#ef4444;background:rgba(239,68,68,0.15);padding:2px 6px;border-radius:4px;white-space:nowrap;">' + elapsedMins + 'm unreplied</div>';
+            listItemsHtml += '</div>';
+          });
+          if (unrepliedChats.length > 10) {
+            listItemsHtml += '<div style="color:#94a3b8;font-size:11px;text-align:center;margin-top:4px;">And ' + (unrepliedChats.length - 10) + ' more chats...</div>';
+          }
+        }
+        
+        var reportHtml = '';
+        reportHtml += '<div id="unreplied-report-card" style="width: 480px; padding: 20px; background: #0f172a; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, sans-serif; border-radius: 12px; box-sizing: border-box;">';
+        reportHtml += '  <div style="border-bottom: 1px solid #334155; padding-bottom: 10px; margin-bottom: 14px; display:flex; justify-content:space-between; align-items:center;">';
+        reportHtml += '    <div>';
+        reportHtml += '      <div style="font-size: 18px; font-weight: 700; color: #38bdf8; letter-spacing: 0.5px;">NAQD EXIM</div>';
+        reportHtml += '      <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Overdue Response Report</div>';
+        reportHtml += '    </div>';
+        reportHtml += '    <div style="text-align: right;">';
+        reportHtml += '      <div style="font-size: 10px; color: #94a3b8;">Generated At</div>';
+        reportHtml += '      <div style="font-size: 12px; font-weight: 500; color: #e2e8f0; margin-top: 2px;">' + nowStr + '</div>';
+        reportHtml += '    </div>';
+        reportHtml += '  </div>';
+        reportHtml += '  <div style="display: flex; gap: 12px; margin-bottom: 16px;">';
+        reportHtml += '    <div style="flex: 1; background: #1e293b; padding: 10px; border-radius: 8px; border: 1px solid #334155; text-align:center;">';
+        reportHtml += '      <div style="font-size: 20px; font-weight: 700; color: #ef4444;">' + unrepliedChats.length + '</div>';
+        reportHtml += '      <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">Awaiting Reply</div>';
+        reportHtml += '    </div>';
+        reportHtml += '    <div style="flex: 1; background: #1e293b; padding: 10px; border-radius: 8px; border: 1px solid #334155; text-align:center;">';
+        reportHtml += '      <div style="font-size: 20px; font-weight: 700; color: #10b981;">' + lateReplies.length + '</div>';
+        reportHtml += '      <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">Late Replies (Today)</div>';
+        reportHtml += '    </div>';
+        reportHtml += '  </div>';
+        reportHtml += '  <div style="font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Overdue Chats:</div>';
+        reportHtml += '  <div style="display:flex; flex-direction:column; gap:6px;">';
+        reportHtml +=      listItemsHtml;
+        reportHtml += '  </div>';
+        reportHtml += '  <div style="border-top: 1px solid #334155; margin-top: 16px; padding-top: 8px; text-align: center; font-size: 9px; color: #64748b;">';
+        reportHtml += '    Generated by Response Alerter';
+        reportHtml += '  </div>';
+        reportHtml += '</div>';
+        
+        hiddenContainer.innerHTML = reportHtml;
+        
+        toast("Rendering report image...");
+        closeModal();
+        
+        setTimeout(function() {
+          html2canvas(document.getElementById("unreplied-report-card"), {
+            backgroundColor: null,
+            scale: 2
+          }).then(function(canvas) {
+            var b64 = canvas.toDataURL("image/png").split(",")[1];
+            hiddenContainer.remove();
+            
+            toast("Sending report image to " + selectedJids.length + " contacts...");
+            
+            var promises = selectedJids.map(function(targetJid) {
+              var number = isGroupJid(targetJid) ? targetJid : jidNum(targetJid);
+              var inst = encodeURIComponent(cfg.inst);
+              return api("POST", "/message/sendMedia/" + inst, {
+                number: number,
+                mediatype: "image",
+                mimetype: "image/png",
+                media: b64,
+                fileName: "response_report.png",
+                caption: "⚠️ *Response Alerter Report* - " + nowStr
+              });
+            });
+            
+            Promise.all(promises).then(function() {
+              toast("Report sent successfully!", "ok");
+            }).catch(function(err) {
+              toast("Failed to send report", "err");
+              logLine(netMsg(err), "err");
+            });
+          }).catch(function(err) {
+            toast("Failed to generate image", "err");
+            logLine(err.message, "err");
+            hiddenContainer.remove();
+          });
+        }, 100);
+      };
+    });
+  }
 
   document.querySelectorAll("#unreplied-filter-tabs .chip").forEach(function(c) {
     c.onclick = function() {
@@ -2479,6 +2756,95 @@
       badge.classList.toggle("hidden", unrepliedChats.length === 0);
     }
     
+    if (unrepliedFilter === "late") {
+      var lateReplies = [];
+      try {
+        lateReplies = JSON.parse(lsGet("naqd_gw_late_replies") || "[]");
+      } catch(e) {}
+      
+      if (lateReplies.length === 0) {
+        listEl.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--faint);font-size:14.5px">No late replies recorded yet.</div>';
+        return;
+      }
+      
+      lateReplies.forEach(function(r, idx) {
+        var row = el("div");
+        row.style.padding = "14px 16px";
+        row.style.borderBottom = "1px solid var(--line)";
+        row.style.display = "flex";
+        row.style.flexDirection = "column";
+        row.style.gap = "6px";
+        
+        var top = el("div");
+        top.style.display = "flex";
+        top.style.justifyContent = "space-between";
+        top.style.alignItems = "center";
+        
+        var title = el("span");
+        title.style.fontWeight = "600";
+        title.style.fontSize = "15px";
+        title.textContent = r.name;
+        
+        var badgeSpan = el("span");
+        badgeSpan.style.background = "rgba(40, 199, 111, 0.15)";
+        badgeSpan.style.color = "var(--up)";
+        badgeSpan.style.fontSize = "11.5px";
+        badgeSpan.style.fontWeight = "600";
+        badgeSpan.style.padding = "2px 8px";
+        badgeSpan.style.borderRadius = "4px";
+        badgeSpan.textContent = "Replied late in " + r.elapsedMins + " mins";
+        
+        top.appendChild(title);
+        top.appendChild(badgeSpan);
+        
+        var body = el("div");
+        body.style.fontSize = "13.5px";
+        body.style.color = "var(--faint)";
+        body.style.whiteSpace = "nowrap";
+        body.style.overflow = "hidden";
+        body.style.textOverflow = "ellipsis";
+        body.textContent = r.clientMsg || "[No message content]";
+        
+        var footer = el("div");
+        footer.style.display = "flex";
+        footer.style.justifyContent = "space-between";
+        footer.style.alignItems = "center";
+        footer.style.marginTop = "4px";
+        
+        var timeEl = el("span");
+        timeEl.style.fontSize = "11.5px";
+        timeEl.style.color = "var(--faint)";
+        timeEl.textContent = "Received: " + formatChatTime(new Date(r.clientTime)) + " | Replied: " + formatChatTime(new Date(r.replyTime)) + " by " + r.repliedBy;
+        
+        var actions = el("div");
+        actions.style.display = "flex";
+        actions.style.gap = "8px";
+        
+        var deleteBtn = el("button", "btn");
+        deleteBtn.style.padding = "4px 8px";
+        deleteBtn.style.fontSize = "12px";
+        deleteBtn.style.height = "26px";
+        deleteBtn.textContent = "Clear";
+        deleteBtn.onclick = function() {
+          lateReplies.splice(idx, 1);
+          lsSet("naqd_gw_late_replies", JSON.stringify(lateReplies));
+          renderUnrepliedView();
+          toast("Late reply cleared", "ok");
+        };
+        
+        actions.appendChild(deleteBtn);
+        footer.appendChild(timeEl);
+        footer.appendChild(actions);
+        
+        row.appendChild(top);
+        row.appendChild(body);
+        row.appendChild(footer);
+        
+        listEl.appendChild(row);
+      });
+      return;
+    }
+
     // Apply filter
     if (unrepliedFilter === "chats") {
       unrepliedChats = unrepliedChats.filter(function(c) { return !isGroupJid(c.jid); });
