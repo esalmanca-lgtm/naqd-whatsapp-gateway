@@ -318,7 +318,7 @@ const server = http.createServer((req, res) => {
     });
   } else if (url === '/' || url === '/index.html' || url === '/naqd-gateway.html') {
     const fileName = (url === '/' || url === '/index.html') ? 'index.html' : 'naqd-gateway.html';
-    const filePath = path.join(__dirname, '..', fileName);
+    const filePath = path.join(__dirname, fileName);
     if (fs.existsSync(filePath)) {
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(fs.readFileSync(filePath));

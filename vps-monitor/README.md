@@ -12,14 +12,14 @@ Since this folder is part of your repository, you don't need to copy-paste scrip
 SSH into your VPS and run:
 ```bash
 git clone https://github.com/esalmanca-lgtm/naqd-whatsapp-gateway.git
-cd naqd-whatsapp-gateway/vps-monitor
+cd naqd-whatsapp-gateway
 ```
 *(If you already have the repository cloned on your VPS, just run `git pull` inside the folder to get the latest files).*
 
 ### 2. Configure variables
 Create a `.env` file inside the `vps-monitor` directory to configure your credentials:
 ```bash
-cat << 'EOF' > .env
+cat << 'EOF' > vps-monitor/.env
 PORT=3000
 API_URL=https://evo.naqd.in
 API_KEY=93D6C0CFC14E-49C8-A8FC-C0300A29D250
@@ -31,10 +31,10 @@ ALERT_FORMAT=⚠️ *Unreplied Chat Alert*\n*Chat:* {name}\n*JID:* {jid}\nNo rep
 EOF
 ```
 
-### 3. Build the Docker Image
-Run this command inside the `vps-monitor` folder to build the image:
+### 3. Build the Docker Image (Run from root folder)
+Run this command from the **root** folder (`naqd-whatsapp-gateway`) of the repository to build the image (so Docker can copy the HTML files):
 ```bash
-docker build -t naqd-monitor .
+docker build -t naqd-monitor -f vps-monitor/Dockerfile .
 ```
 
 ### 4. Start the Container
@@ -44,8 +44,8 @@ docker run -d \
   --name naqd-monitor \
   --restart always \
   -p 3000:3000 \
-  -v $(pwd)/monitor_state.json:/app/monitor_state.json \
-  --env-file .env \
+  -v $(pwd)/vps-monitor/monitor_state.json:/app/monitor_state.json \
+  --env-file vps-monitor/.env \
   naqd-monitor
 ```
 
