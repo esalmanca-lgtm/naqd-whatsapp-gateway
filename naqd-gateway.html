@@ -2500,10 +2500,11 @@
       footer.style.alignItems = "center";
       footer.style.marginTop = "4px";
       
+      var senderNum = getSenderPhone(lm);
       var timeEl = el("span");
       timeEl.style.fontSize = "11.5px";
       timeEl.style.color = "var(--faint)";
-      timeEl.textContent = "Received: " + timeStr;
+      timeEl.textContent = "Received: " + timeStr + (senderNum ? " from " + senderNum : "");
       
       var actions = el("div");
       actions.style.display = "flex";
