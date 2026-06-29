@@ -758,12 +758,11 @@
     if (officeNums.indexOf(sender) > -1) return false;
     
     var msgTimeMs = tsMs(lm.messageTimestamp);
-    if (msgTimeMs < appStartupTime) return false;
-    
+    var elapsed = Date.now() - msgTimeMs;
     var timeoutMins = parseInt(lsGet("naqd_gw_alert_timeout") || "10", 10);
     if (isNaN(timeoutMins)) timeoutMins = 10;
-    var elapsed = Date.now() - msgTimeMs;
-    return elapsed >= (timeoutMins * 60 * 1000);
+    // Show chats unreplied for more than the timeout, but less than 24 hours (to filter out ancient history)
+    return elapsed >= (timeoutMins * 60 * 1000) && elapsed < (24 * 60 * 60 * 1000);
   }
 
   function checkUnrepliedAlerts() {
