@@ -366,6 +366,10 @@
     <button class="nav-btn" data-view="dashboard" title="Dashboard">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
     </button>
+    <button class="nav-btn" data-view="unreplied" title="Response Alerter" style="position:relative">
+      <span class="badge hidden" id="unreplied-badge" style="background:var(--down)">0</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    </button>
     <div class="spacer"></div>
     <button class="nav-btn" id="theme" title="Theme">
       <svg id="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -499,6 +503,41 @@
         </select>
       </div>
       <div id="task-list"></div>
+    </div>
+  </section>
+
+  <!-- UNREPLIED VIEW -->
+  <section class="view unreplied" data-view="unreplied">
+    <div class="unreplied-wrap" style="max-width:800px;margin:0 auto;padding:20px;display:flex;flex-direction:column;gap:16px;min-height:0;height:100%;box-sizing:border-box">
+      <div class="head" style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:8px">
+        <div>
+          <h1 style="margin:0;font-size:24px;font-weight:600">Response Alerter</h1>
+          <p style="margin:4px 0 0;font-size:13px;color:var(--faint)">Chats unreplied by office numbers for more than 10 minutes</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn" id="btn-refresh-unreplied" style="padding:0 12px;height:34px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;margin-right:6px"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Refresh</button>
+          <button class="btn primary" id="btn-config-unreplied" style="padding:0 12px;height:34px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;margin-right:6px"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</button>
+        </div>
+      </div>
+      <div id="unreplied-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:8px">
+        <div class="panel" style="padding:12px;display:flex;align-items:center;gap:12px">
+          <div style="width:36px;height:36px;border-radius:8px;background:rgba(234, 84, 85, 0.15);color:var(--down);display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+          <div>
+            <div id="unreplied-total-count" style="font-size:20px;font-weight:600;line-height:1.2">0</div>
+            <div style="font-size:11.5px;color:var(--faint)">Awaiting Reply</div>
+          </div>
+        </div>
+        <div class="panel" style="padding:12px;display:flex;align-items:center;gap:12px">
+          <div style="width:36px;height:36px;border-radius:8px;background:rgba(40, 199, 111, 0.15);color:var(--up);display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px"><polyline points="20 6 9 17 4 12"/></svg></div>
+          <div>
+            <div id="unreplied-status-pill" style="font-size:14px;font-weight:600;line-height:1.2;color:var(--up)">Active</div>
+            <div style="font-size:11.5px;color:var(--faint)">Alert Engine Status</div>
+          </div>
+        </div>
+      </div>
+      <div id="unreplied-list-container" class="panel" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;border-radius:8px;border:1px solid var(--line)">
+        <div id="unreplied-list" style="display:flex;flex-direction:column"></div>
+      </div>
     </div>
   </section>
 </div>
@@ -728,6 +767,11 @@
   }
 
   function checkUnrepliedAlerts() {
+    updateSidebarUnrepliedBadge();
+    if (view === "unreplied") {
+      renderUnrepliedView();
+    }
+
     var enabled = lsGet("naqd_gw_alert_enabled") === "true";
     if (!enabled) return;
     
@@ -1122,9 +1166,6 @@
       src=chats;
     }else if(chatTab==="groups"){
       src=groups;
-    }else if(chatTab==="unreplied"){
-      var combined=chats.concat(groups);
-      src=combined.filter(isChatUnreplied);
     }else{
       var combined=chats.concat(groups);
       src=combined.filter(function(c){
@@ -1788,7 +1829,7 @@
   function renderTabs(){
     var bar=$("tab-bar"); if(!bar)return;
     bar.innerHTML="";
-    var std=["chats","groups","unreplied"];
+    var std=["chats","groups"];
     std.forEach(function(t){
       var btn=el("button","tab"+(chatTab===t?" active":""));
       btn.textContent=t.charAt(0).toUpperCase()+t.slice(1);
@@ -2051,6 +2092,7 @@
     for(var j=0;j<vs.length;j++)vs[j].classList.toggle("active",vs[j].getAttribute("data-view")===v);
     if(v==="dashboard"){refreshDash();}
     if(v==="tasks"){renderTasks();}
+    if(v==="unreplied"){renderUnrepliedView();}
     if(v==="messages"&&!chats.length&&!groups.length){loadContactsList().then(loadChats);loadGroups();}
   }
 
@@ -2314,7 +2356,152 @@
     }
   };
   $("copy-host").onclick=function(){try{navigator.clipboard.writeText(cfg.url);toast("Address copied","ok");}catch(e){}};
-  document.addEventListener("visibilitychange",function(){if(!document.hidden&&cfg){if(view==="dashboard")refreshDash();if(view==="messages"){loadChats();if(active)loadMessages(active.jid,false);}}});
+  document.addEventListener("visibilitychange",function(){if(!document.hidden&&cfg){if(view==="dashboard")refreshDash();if(view==="unreplied")renderUnrepliedView();if(view==="messages"){loadChats();if(active)loadMessages(active.jid,false);}}});
+
+  $("btn-refresh-unreplied").onclick = function() {
+    toast("Refreshing...");
+    loadChats();
+  };
+  $("btn-config-unreplied").onclick = settingsModal;
+
+  function updateSidebarUnrepliedBadge() {
+    var combined = chats.concat(groups);
+    var unrepliedChats = combined.filter(isChatUnreplied);
+    var badge = $("unreplied-badge");
+    if (badge) {
+      badge.textContent = unrepliedChats.length;
+      badge.classList.toggle("hidden", unrepliedChats.length === 0);
+    }
+  }
+
+  function renderUnrepliedView() {
+    var listEl = $("unreplied-list");
+    if (!listEl) return;
+    listEl.innerHTML = "";
+    
+    var enabled = lsGet("naqd_gw_alert_enabled") === "true";
+    var statusPill = $("unreplied-status-pill");
+    if (statusPill) {
+      statusPill.textContent = enabled ? "Active" : "Disabled";
+      statusPill.className = "pill " + (enabled ? "live" : "dead");
+    }
+    
+    var combined = chats.concat(groups);
+    var unrepliedChats = combined.filter(isChatUnreplied);
+    
+    var countEl = $("unreplied-total-count");
+    if (countEl) {
+      countEl.textContent = unrepliedChats.length;
+    }
+    
+    var badge = $("unreplied-badge");
+    if (badge) {
+      badge.textContent = unrepliedChats.length;
+      badge.classList.toggle("hidden", unrepliedChats.length === 0);
+    }
+    
+    if (unrepliedChats.length === 0) {
+      listEl.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--faint);font-size:14.5px">No unreplied client messages at this time.</div>';
+      return;
+    }
+    
+    unrepliedChats.forEach(function(c) {
+      var row = el("div");
+      row.style.padding = "14px 16px";
+      row.style.borderBottom = "1px solid var(--line)";
+      row.style.display = "flex";
+      row.style.flexDirection = "column";
+      row.style.gap = "6px";
+      
+      var lm = c.lastMessage || (c._raw && c._raw.lastMessage);
+      var text = lm ? msgText(lm) : "[No messages]";
+      var timeStr = lm ? formatChatTime(new Date(tsMs(lm.messageTimestamp))) : "";
+      
+      var elapsedMs = Date.now() - tsMs(lm ? lm.messageTimestamp : 0);
+      var elapsedMins = Math.floor(elapsedMs / (60 * 1000));
+      
+      var top = el("div");
+      top.style.display = "flex";
+      top.style.justifyContent = "space-between";
+      top.style.alignItems = "center";
+      
+      var title = el("span");
+      title.style.fontWeight = "600";
+      title.style.fontSize = "15px";
+      title.textContent = c.name || jidNum(c.jid);
+      
+      var badgeSpan = el("span");
+      badgeSpan.style.background = "rgba(234, 84, 85, 0.15)";
+      badgeSpan.style.color = "var(--down)";
+      badgeSpan.style.fontSize = "11.5px";
+      badgeSpan.style.fontWeight = "600";
+      badgeSpan.style.padding = "2px 8px";
+      badgeSpan.style.borderRadius = "4px";
+      badgeSpan.textContent = elapsedMins + " mins unreplied";
+      
+      top.appendChild(title);
+      top.appendChild(badgeSpan);
+      
+      var body = el("div");
+      body.style.fontSize = "13.5px";
+      body.style.color = "var(--ink)";
+      body.style.whiteSpace = "nowrap";
+      body.style.overflow = "hidden";
+      body.style.textOverflow = "ellipsis";
+      body.textContent = text;
+      
+      var footer = el("div");
+      footer.style.display = "flex";
+      footer.style.justifyContent = "space-between";
+      footer.style.alignItems = "center";
+      footer.style.marginTop = "4px";
+      
+      var timeEl = el("span");
+      timeEl.style.fontSize = "11.5px";
+      timeEl.style.color = "var(--faint)";
+      timeEl.textContent = "Received: " + timeStr;
+      
+      var actions = el("div");
+      actions.style.display = "flex";
+      actions.style.gap = "8px";
+      
+      var ignoreBtn = el("button", "btn");
+      ignoreBtn.style.padding = "4px 8px";
+      ignoreBtn.style.fontSize = "12px";
+      ignoreBtn.style.height = "26px";
+      ignoreBtn.textContent = "Ignore";
+      ignoreBtn.onclick = function() {
+        if (lm) {
+          alertedMsgIds[lm.key.id] = true;
+          lsSet("naqd_gw_alerted_ids", JSON.stringify(alertedMsgIds));
+          renderUnrepliedView();
+          toast("Chat ignored from alerter", "ok");
+        }
+      };
+      
+      var openBtn = el("button", "btn primary");
+      openBtn.style.padding = "4px 8px";
+      openBtn.style.fontSize = "12px";
+      openBtn.style.height = "26px";
+      openBtn.textContent = "Open Chat";
+      openBtn.onclick = function() {
+        setView("messages");
+        openChat(c);
+      };
+      
+      actions.appendChild(ignoreBtn);
+      actions.appendChild(openBtn);
+      
+      footer.appendChild(timeEl);
+      footer.appendChild(actions);
+      
+      row.appendChild(top);
+      row.appendChild(body);
+      row.appendChild(footer);
+      
+      listEl.appendChild(row);
+    });
+  }
 
   /* ---- restore ---- */
   var th=lsGet(THKEY);applyTheme(th||"light");
