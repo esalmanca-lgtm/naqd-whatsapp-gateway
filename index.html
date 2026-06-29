@@ -804,6 +804,10 @@
     var target = (lsGet("naqd_gw_alert_target") || "").trim();
     if (!target) return;
     
+    try {
+      alertedMsgIds = JSON.parse(lsGet("naqd_gw_alerted_ids") || "{}");
+    } catch(e) {}
+    
     var combined = chats.concat(groups);
     var now = Date.now();
     var timeoutMins = parseInt(lsGet("naqd_gw_alert_timeout") || "10", 10);
@@ -2280,7 +2284,7 @@
     setView("messages");
     // refresh chat list periodically
     if(listPoll)clearInterval(listPoll);
-    listPoll=setInterval(function(){if(!document.hidden&&view==="messages")loadChats();},25000);
+    listPoll=setInterval(function(){loadChats();},30000);
   }
 
   /* ---- gate ---- */
