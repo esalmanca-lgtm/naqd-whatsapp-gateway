@@ -833,6 +833,7 @@
         if (myNum && sender === myNum) return;
       }
       
+      var msgTimeMs = tsMs(lm.messageTimestamp);
       var elapsed = now - msgTimeMs;
       // Do not send alerts for messages older than 12 hours to avoid alerting on backlog
       if (elapsed > (12 * 60 * 60 * 1000)) return;
