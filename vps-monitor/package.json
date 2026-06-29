@@ -1,0 +1,13 @@
+{
+  "name": "naqd-vps-monitor",
+  "version": "1.0.0",
+  "description": "Background response alerter daemon for VPS",
+  "main": "monitor.js",
+  "scripts": {
+    "start": "node monitor.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.8",
+    "dotenv": "^16.4.5"
+  }
+}

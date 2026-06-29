@@ -1,0 +1,57 @@
+# NAQD WhatsApp Response Monitor Daemon (Docker VPS Hosting)
+
+This is a lightweight Node.js background daemon designed to run 24/7 inside a Docker container on your VPS to monitor overdue client messages and send alerts automatically.
+
+## Quick Start on VPS via Git
+
+Since this folder is part of your repository, you don't need to copy-paste scripts. Just download the repository onto your VPS and build the container:
+
+### 1. Download the repository on VPS
+SSH into your VPS and run:
+```bash
+git clone https://github.com/esalmanca-lgtm/naqd-whatsapp-gateway.git
+cd naqd-whatsapp-gateway/vps-monitor
+```
+*(If you already have the repository cloned on your VPS, just run `git pull` inside the folder to get the latest files).*
+
+### 2. Configure variables
+Create a `.env` file inside the `vps-monitor` directory to configure your credentials:
+```bash
+cat << 'EOF' > .env
+API_URL=https://evo.naqd.in
+API_KEY=93D6C0CFC14E-49C8-A8FC-C0300A29D250
+INSTANCE=EXIM
+TARGET_JID=120363411366521608@g.us
+OFFICE_NUMBERS=918848159581,919380525080,919778159581,919495849582,918136849582,919495739582
+TIMEOUT_MINS=10
+ALERT_FORMAT=⚠️ *Unreplied Chat Alert*\n*Chat:* {name}\n*JID:* {jid}\nNo reply has been sent for over {timeout} minutes!
+EOF
+```
+
+### 3. Build the Docker Image
+Run this command inside the `vps-monitor` folder to build the image:
+```bash
+docker build -t naqd-monitor .
+```
+
+### 4. Start the Container
+Run this command to start the container in the background (configured to always auto-restart and store compliance logs on the host VPS persistent disk):
+```bash
+docker run -d \
+  --name naqd-monitor \
+  --restart always \
+  -v $(pwd)/monitor_state.json:/app/monitor_state.json \
+  --env-file .env \
+  naqd-monitor
+```
+
+### 5. Check logs & verify
+Verify the container is running and watch the logs:
+```bash
+# View running status
+docker ps
+
+# Stream logs
+docker logs -f naqd-monitor
+```
+Press `Ctrl+C` to exit the live logs stream.
