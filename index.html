@@ -756,12 +756,25 @@
     return clean.replace(/[^0-9]/g, "");
   }
 
+  function getSenderPhone(lm) {
+    if (!lm) return "";
+    var remoteJid = (lm.key && lm.key.remoteJid) || "";
+    var isGroup = remoteJid.indexOf("@g.us") > -1;
+    var senderJid = "";
+    if (isGroup) {
+      senderJid = lm.participant || (lm.key && lm.key.participant) || "";
+    } else {
+      senderJid = remoteJid;
+    }
+    return cleanJidPhone(senderJid);
+  }
+
   function isChatUnreplied(c) {
     var lm = c.lastMessage || (c._raw && c._raw.lastMessage);
     if (!lm || !lm.key) return false;
     if (lm.key.fromMe) return false;
     
-    var sender = cleanJidPhone(lm.key.participant || lm.key.remoteJid);
+    var sender = getSenderPhone(lm);
     var officeStr = lsGet("naqd_gw_alert_office") || "";
     var officeNums = officeStr.split(",").map(function(s){return cleanJidPhone(s);}).filter(Boolean);
     if (officeNums.indexOf(sender) > -1) return false;
@@ -806,7 +819,7 @@
       if (alertedMsgIds[mid]) return;
       if (lm.key.fromMe) return;
       
-      var sender = cleanJidPhone(lm.key.participant || lm.key.remoteJid);
+      var sender = getSenderPhone(lm);
       var officeStr = lsGet("naqd_gw_alert_office") || "";
       var officeNums = officeStr.split(",").map(function(s){return cleanJidPhone(s);}).filter(Boolean);
       if (officeNums.indexOf(sender) > -1) return;
