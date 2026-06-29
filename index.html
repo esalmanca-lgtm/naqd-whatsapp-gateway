@@ -247,6 +247,16 @@
   [data-theme="dark"] .send-fab{background:var(--signal);color:#06140C}
   .send-fab:hover{background:var(--btn-ink-hover)}
   .send-fab svg{width:19px;height:19px}
+  .rec-dot{animation:pulse-rec 1.2s infinite}
+  @keyframes pulse-rec {
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.25); opacity: 0.4; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .voice-btn, .rec-cancel-btn{width:44px;height:44px;border-radius:50%;border:0;background:var(--surface-2);color:var(--muted);
+    cursor:pointer;display:grid;place-items:center;flex:none;transition:.16s}
+  .voice-btn:hover, .rec-cancel-btn:hover{color:var(--ink);background:var(--surface-3)}
+  .voice-btn svg, .rec-cancel-btn svg{width:20px;height:20px}
   .cv-blank{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:14px;color:var(--faint);text-align:center;padding:24px}
   .cv-blank svg{width:54px;height:54px;opacity:.4}
@@ -426,7 +436,22 @@
           <button class="attach-btn" id="cv-attach" title="Attach file">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
           </button>
+          
           <textarea id="cv-text" rows="1" placeholder="Type a message"></textarea>
+          
+          <div id="cv-rec-ui" class="hidden" style="display:flex;align-items:center;flex:1;gap:12px;padding:0 8px;color:var(--down)">
+            <span class="rec-dot" style="width:10px;height:10px;background:var(--down);border-radius:50%;display:inline-block"></span>
+            <span id="cv-rec-timer" style="font-family:monospace;font-size:14px;font-weight:600">00:00</span>
+          </div>
+
+          <button class="rec-cancel-btn hidden" id="cv-rec-cancel" title="Cancel recording" style="color:var(--down)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+
+          <button class="voice-btn" id="cv-voice" title="Record voice message">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </button>
+          
           <button class="send-fab" id="cv-send" title="Send">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
@@ -1879,6 +1904,130 @@
     }).catch(function(e){toast("Send failed","err");logLine(netMsg(e),"err");});
   }
 
+  /* ============ VOICE NOTE RECORDING ============ */
+  var mediaRecorder = null;
+  var audioChunks = [];
+  var recInterval = null;
+  var recSeconds = 0;
+
+  function startRecording() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast("Voice recording not supported on this browser", "err");
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+      audioChunks = [];
+      mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = function(e) {
+        if (e.data.size > 0) {
+          audioChunks.push(e.data);
+        }
+      };
+      mediaRecorder.onstop = function() {
+        stream.getTracks().forEach(function(track) { track.stop(); });
+        if (audioChunks.length > 0) {
+          var audioBlob = new Blob(audioChunks, { type: 'audio/ogg; codecs=opus' });
+          sendAudioMessage(audioBlob);
+        }
+      };
+      mediaRecorder.start();
+      $("cv-text").classList.add("hidden");
+      $("cv-rec-ui").classList.remove("hidden");
+      $("cv-rec-cancel").classList.remove("hidden");
+      $("cv-voice").innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      $("cv-voice").title = "Send recording";
+      $("cv-voice").style.color = "var(--signal)";
+      $("cv-voice").style.background = "var(--signal-soft)";
+      $("cv-attach").classList.add("hidden");
+      $("cv-send").classList.add("hidden");
+      
+      recSeconds = 0;
+      $("cv-rec-timer").textContent = "00:00";
+      if (recInterval) clearInterval(recInterval);
+      recInterval = setInterval(function() {
+        recSeconds++;
+        var m = Math.floor(recSeconds / 60);
+        var s = recSeconds % 60;
+        $("cv-rec-timer").textContent = pad(m) + ":" + pad(s);
+        if (recSeconds >= 300) {
+          stopAndSendRecording();
+        }
+      }, 1000);
+    }).catch(function(err) {
+      toast("Microphone access denied", "err");
+      console.error(err);
+    });
+  }
+
+  function stopAndSendRecording() {
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      mediaRecorder.stop();
+    }
+    resetRecordingUI();
+  }
+
+  function cancelRecording() {
+    if (mediaRecorder) {
+      mediaRecorder.onstop = function() {
+        mediaRecorder.stream.getTracks().forEach(function(track) { track.stop(); });
+      };
+      if (mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+      }
+    }
+    resetRecordingUI();
+    toast("Recording cancelled");
+  }
+
+  function resetRecordingUI() {
+    if (recInterval) clearInterval(recInterval);
+    recInterval = null;
+    recSeconds = 0;
+    $("cv-text").classList.remove("hidden");
+    $("cv-rec-ui").classList.add("hidden");
+    $("cv-rec-cancel").classList.add("hidden");
+    $("cv-voice").innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
+    $("cv-voice").title = "Record voice message";
+    $("cv-voice").style.color = "var(--muted)";
+    $("cv-voice").style.background = "var(--surface-2)";
+    $("cv-attach").classList.remove("hidden");
+    $("cv-send").classList.remove("hidden");
+  }
+
+  function sendAudioMessage(blob) {
+    if (!active) return;
+    var targetJid = active.jid;
+    var number = isGroupJid(targetJid) ? targetJid : jidNum(targetJid);
+    var inst = encodeURIComponent(cfg.inst);
+    toast("Sending voice message…");
+    
+    var reader = new FileReader();
+    reader.onload = function() {
+      var parts = reader.result.split(",");
+      var b64 = parts[1] || parts[0];
+      api("POST", "/message/sendWhatsAppAudio/" + inst, { number: number, audio: b64, encoding: true })
+      .then(function() {
+        toast("Voice message sent", "ok");
+        var chat = null;
+        for (var i = 0; i < chats.length; i++) {
+          if (chats[i].jid === targetJid) { chat = chats[i]; break; }
+        }
+        if (chat) {
+          chat.last = "🎙️ Voice message";
+          chat.updatedAt = Date.now();
+          chats.sort(function(a, b) { return b.updatedAt - a.updatedAt; });
+          renderChatList();
+        }
+        setTimeout(function() { if (active && active.jid === targetJid) loadMessages(active.jid, true); }, 900);
+      })
+      .catch(function(e) {
+        toast("Voice message send failed", "err");
+        logLine(netMsg(e), "err");
+      });
+    };
+    reader.readAsDataURL(blob);
+  }
+
   /* ============ TASKS ============ */
   function loadTasks(){try{tasks=JSON.parse(lsGet(TKEY)||"[]");}catch(e){tasks=[];}if(!Array.isArray(tasks))tasks=[];}
   function saveTasks(){lsSet(TKEY,JSON.stringify(tasks));updateBadge();}
@@ -2541,6 +2690,14 @@
   $("new-chat").onclick=newChatModal;
   $("new-task").onclick=function(){openTaskModal({});};
   $("cv-send").onclick=sendInChat;
+  $("cv-voice").onclick=function(){
+    if (mediaRecorder && mediaRecorder.state === "recording") {
+      stopAndSendRecording();
+    } else {
+      startRecording();
+    }
+  };
+  $("cv-rec-cancel").onclick=cancelRecording;
   $("cv-attach").onclick=function(){$("cv-file").click();};
   $("cv-file").onchange=function(e){var f=e.target.files&&e.target.files[0];if(f)openAttachModal(f);e.target.value="";};
   $("cv-refresh").onclick=function(){if(active)loadMessages(active.jid,true);};
