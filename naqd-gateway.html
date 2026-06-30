@@ -595,7 +595,7 @@
   var REFRESH_MS=15000;
   var appStartupTime = Date.now();
   var cfg=null, view="messages", chatTab="chats", taskFilter="open";
-  var chats=[], groups=[], tasks=[], active=null, msgCache={}, searchTerm="";
+  var chats=[], groups=[], tasks=[], active=null, msgCache={}, searchTerm="", isVpsBackendActive = false;
   var db = {
     dbName: "naqd_gateway_db",
     dbVersion: 1,
@@ -968,7 +968,7 @@
 
     // Automated text notification sender
     var enabled = lsGet("naqd_gw_alert_enabled") === "true";
-    if (!enabled) return;
+    if (!enabled || isVpsBackendActive) return;
     
     var target = (lsGet("naqd_gw_alert_target") || "").trim();
     if (!target) return;
@@ -3026,6 +3026,7 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data && data.alert_target) {
+          isVpsBackendActive = true;
           lsSet("naqd_gw_alert_enabled", (data.alert_enabled === true || data.alert_enabled === "true") ? "true" : "false");
           lsSet("naqd_gw_alert_target", data.alert_target);
           lsSet("naqd_gw_alert_office", data.alert_office);
