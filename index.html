@@ -719,10 +719,55 @@
       mediaKeys.push(id);
       if (mediaKeys.length > 80) {
         var oldest = mediaKeys.shift();
+        // Revoke blob URL if present to free memory
+        if(mediaCache[oldest] && mediaCache[oldest].blobUrl){
+          try{URL.revokeObjectURL(mediaCache[oldest].blobUrl);}catch(e){}
+        }
         delete mediaCache[oldest];
       }
     }
     mediaCache[id] = data;
+  }
+  /* ---- Media fetch queue: max 3 concurrent API calls ---- */
+  var _mqQueue=[], _mqActive=0, _mqMax=3;
+  function enqueueMedia(fn){
+    _mqQueue.push(fn);
+    _drainMQ();
+  }
+  function _drainMQ(){
+    while(_mqActive<_mqMax && _mqQueue.length>0){
+      _mqActive++;
+      var job=_mqQueue.shift();
+      job().then(function(){_mqActive--;_drainMQ();}).catch(function(){_mqActive--;_drainMQ();});
+    }
+  }
+  /* ---- Base64 data-URL → Blob URL (much lighter in memory) ---- */
+  function base64ToBlobUrl(dataUrl){
+    try{
+      var parts=dataUrl.split(',');
+      var mimeMatch=parts[0].match(/:(.*?);/);
+      var mime=mimeMatch?mimeMatch[1]:'application/octet-stream';
+      var raw=atob(parts[1]);
+      var u8=new Uint8Array(raw.length);
+      for(var i=0;i<raw.length;i++)u8[i]=raw.charCodeAt(i);
+      return URL.createObjectURL(new Blob([u8],{type:mime}));
+    }catch(e){return dataUrl;}
+  }
+  /* ---- Lazy media loader via IntersectionObserver ---- */
+  var _mediaObserver=null;
+  function getMediaObserver(){
+    if(_mediaObserver)return _mediaObserver;
+    if(typeof IntersectionObserver==='undefined')return null;
+    _mediaObserver=new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if(entry.isIntersecting){
+          var s=entry.target;
+          _mediaObserver.unobserve(s);
+          if(s._mMsg && s._mKind) ensureMedia(s._mMsg, s, s._mKind);
+        }
+      });
+    },{root:$('cv-scroll'), rootMargin:'300px 0px'});
+    return _mediaObserver;
   }
   var dashTimer=null, deadline=0, convoPoll=null, listPoll=null, resolving={};
   var lidMap={};
@@ -1748,8 +1793,20 @@
       b.appendChild(body);
     } else {
       var slot=el("div","b-slot");b.appendChild(slot);
-      if(kind==="image"||kind==="sticker"||kind==="audio"){ensureMedia(m,slot,kind);}
-      else{
+      if(kind==="image"||kind==="sticker"||kind==="audio"){
+        // Check memory cache first — if hit, render immediately (no lazy delay)
+        var _mid=m.key&&m.key.id;
+        if(_mid && mediaCache[_mid]){
+          ensureMedia(m,slot,kind);
+        } else {
+          // Lazy-load: show placeholder shimmer, fetch only when scrolled into view
+          var shimKind=(kind==="audio")?'audio-shimmer':'media-shimmer';
+          slot.innerHTML='<div class="'+shimKind+'"></div>';
+          slot._mMsg=m; slot._mKind=kind;
+          var obs=getMediaObserver();
+          if(obs){obs.observe(slot);}else{ensureMedia(m,slot,kind);}
+        }
+      } else {
         var lb=el("button","media-btn");
         lb.innerHTML=(kind==="video"
           ?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Load video'
@@ -1835,15 +1892,26 @@
 
   function ensureMedia(m,slot,kind){
     var id=m.key&&m.key.id;
+    // Use blob URL for display (lighter than base64 data URL in DOM)
+    function displayUrl(c){
+      if(c.blobUrl) return c.blobUrl;
+      if(c.url && c.url.indexOf('data:')===0){
+        var bUrl=base64ToBlobUrl(c.url);
+        c.blobUrl=bUrl;
+        return bUrl;
+      }
+      return c.url;
+    }
     function paint(c){
       slot.innerHTML="";
+      var dUrl=displayUrl(c);
       if(kind==="image"||kind==="sticker"){
-        var im=el("img","b-img");im.src=c.url;im.alt="image";
-        im.onclick=function(){openModal('<img src="'+c.url+'" style="max-width:100%;max-height:72vh;border-radius:10px;display:block;margin:0 auto">');};
+        var im=el("img","b-img");im.src=dUrl;im.alt="image";im.loading="lazy";
+        im.onclick=function(){openModal('<img src="'+dUrl+'" style="max-width:100%;max-height:72vh;border-radius:10px;display:block;margin:0 auto">');};
         im.onload=function(){var box=$("cv-scroll");if(box.scrollHeight-box.scrollTop-box.clientHeight<300)box.scrollTop=box.scrollHeight;};
         slot.appendChild(im);
-      } else if(kind==="audio"){var au=el("audio","b-audio");au.controls=true;au.src=c.url;slot.appendChild(au);}
-      else if(kind==="video"){var v=el("video","b-video");v.controls=true;v.src=c.url;slot.appendChild(v);}
+      } else if(kind==="audio"){var au=el("audio","b-audio");au.controls=true;au.preload="metadata";au.src=dUrl;slot.appendChild(au);}
+      else if(kind==="video"){var v=el("video","b-video");v.controls=true;v.preload="metadata";v.src=dUrl;slot.appendChild(v);}
       else{
         var isPdf = (c.mime==="application/pdf") || (c.fileName && c.fileName.toLowerCase().endsWith(".pdf"));
         var isTxt = (c.mime && c.mime.startsWith("text/")) || (c.fileName && /\.(txt|csv|json|xml|log)$/i.test(c.fileName));
@@ -1855,51 +1923,55 @@
           viewBtn.querySelector("span").textContent = c.fileName || "View Document";
           viewBtn.onclick = function(e) {
             e.preventDefault();
-            openPdfViewer(c.url, c.fileName || "Document");
+            openPdfViewer(dUrl, c.fileName || "Document");
           };
           slot.appendChild(viewBtn);
         } else {
-          var a = el("a", "b-doc"); a.href = c.url; a.download = c.fileName || "file";
+          var a = el("a", "b-doc"); a.href = dUrl; a.download = c.fileName || "file";
           a.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span></span>';
           a.querySelector("span").textContent = c.fileName || "Download";
           slot.appendChild(a);
         }
       }
     }
+    // 1) In-memory cache hit → instant
     if(mediaCache[id]){paint(mediaCache[id]);return;}
+    // 2) IndexedDB cache → fast
     db.get("media_" + id, function(cachedMedia) {
       if(cachedMedia) {
-        mediaCache[id] = cachedMedia;
+        cacheMedia(id, cachedMedia);
         paint(cachedMedia);
         return;
       }
-      // Show shimmer placeholder while fetching media
+      // 3) Network fetch — via queue (max 3 concurrent)
       var shimKind = (kind==="audio") ? 'audio-shimmer' : 'media-shimmer';
       slot.innerHTML='<div class="'+shimKind+'"></div>';
-      api("POST","/chat/getBase64FromMediaMessage/"+encodeURIComponent(cfg.inst),{message:m,convertToMp4:false})
-      .then(function(d){
-        if(!d||!d.base64)throw new Error("No media returned");
-        var mime=((d.mimetype||"").split(";")[0])||(kind==="image"?"image/jpeg":kind==="audio"?"audio/ogg":kind==="video"?"video/mp4":"application/octet-stream");
-        var c={url:"data:"+mime+";base64,"+d.base64,mime:mime,fileName:d.fileName};
-        cacheMedia(id,c);
-        db.set("media_" + id, c);
-        paint(c);
-      }).catch(function(e){
-        var errMsg = "Couldn't load";
-        if (e) {
-          var msg = (e.message || "").toLowerCase();
-          if (msg.includes("failed to fetch stream") || msg.includes("fetch stream") || msg.includes("stream")) {
-            errMsg = "Media expired/unavailable";
-          } else if (e.status === 404) {
-            errMsg = "Media not found";
-          } else if (e.status === 504 || e.status === 502 || msg.includes("timeout")) {
-            errMsg = "Server timeout";
-          } else if (e.message && e.message.length < 30 && !e.message.includes("http")) {
-            errMsg = e.message;
+      enqueueMedia(function(){
+        return api("POST","/chat/getBase64FromMediaMessage/"+encodeURIComponent(cfg.inst),{message:m,convertToMp4:false})
+        .then(function(d){
+          if(!d||!d.base64)throw new Error("No media returned");
+          var mime=((d.mimetype||"").split(";")[0])||(kind==="image"?"image/jpeg":kind==="audio"?"audio/ogg":kind==="video"?"video/mp4":"application/octet-stream");
+          var c={url:"data:"+mime+";base64,"+d.base64,mime:mime,fileName:d.fileName};
+          cacheMedia(id,c);
+          db.set("media_" + id, c);
+          paint(c);
+        }).catch(function(e){
+          var errMsg = "Couldn't load";
+          if (e) {
+            var msg = (e.message || "").toLowerCase();
+            if (msg.includes("failed to fetch stream") || msg.includes("fetch stream") || msg.includes("stream")) {
+              errMsg = "Media expired/unavailable";
+            } else if (e.status === 404) {
+              errMsg = "Media not found";
+            } else if (e.status === 504 || e.status === 502 || msg.includes("timeout")) {
+              errMsg = "Server timeout";
+            } else if (e.message && e.message.length < 30 && !e.message.includes("http")) {
+              errMsg = e.message;
+            }
           }
-        }
-        slot.innerHTML="";var rb=el("button","media-retry");rb.textContent=errMsg+" — retry";
-        rb.onclick=function(){ensureMedia(m,slot,kind);};slot.appendChild(rb);
+          slot.innerHTML="";var rb=el("button","media-retry");rb.textContent=errMsg+" — retry";
+          rb.onclick=function(){ensureMedia(m,slot,kind);};slot.appendChild(rb);
+        });
       });
     });
   }
