@@ -3,5 +3,5 @@ WORKDIR /app
 COPY vps-monitor/package*.json ./
 RUN npm install --production
 COPY vps-monitor/monitor.js ./
-COPY index.html naqd-gateway.html ./
+COPY index.html naqd-gateway.html manifest.json sw.js icon.svg icon*.png ./
 CMD [ "node", "monitor.js" ]

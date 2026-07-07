@@ -316,15 +316,32 @@ const server = http.createServer((req, res) => {
         res.end('Invalid JSON');
       }
     });
-  } else if (url === '/' || url === '/index.html' || url === '/naqd-gateway.html') {
-    const fileName = (url === '/' || url === '/index.html') ? 'index.html' : 'naqd-gateway.html';
+  } else if (
+    url === '/' ||
+    url === '/index.html' ||
+    url === '/naqd-gateway.html' ||
+    url === '/manifest.json' ||
+    url === '/sw.js' ||
+    url === '/icon.svg' ||
+    url === '/icon-192.png' ||
+    url === '/icon-512.png' ||
+    url === '/icon-maskable-192.png' ||
+    url === '/icon-maskable-512.png'
+  ) {
+    const fileName = (url === '/' || url === '/index.html') ? 'index.html' : url.substring(1);
     const filePath = path.join(__dirname, fileName);
     if (fs.existsSync(filePath)) {
-      res.writeHead(200, { 'Content-Type': 'text/html' });
+      let contentType = 'text/html';
+      if (fileName.endsWith('.json')) contentType = 'application/json';
+      else if (fileName.endsWith('.js')) contentType = 'application/javascript';
+      else if (fileName.endsWith('.svg')) contentType = 'image/svg+xml';
+      else if (fileName.endsWith('.png')) contentType = 'image/png';
+      
+      res.writeHead(200, { 'Content-Type': contentType });
       res.end(fs.readFileSync(filePath));
     } else {
       res.writeHead(404);
-      res.end('Dashboard HTML Not Found');
+      res.end('File Not Found');
     }
   } else {
     res.writeHead(404);
