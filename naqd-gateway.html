@@ -198,6 +198,31 @@
   .ci-time.highlight{color:var(--signal);font-weight:600}
   .ml-empty,.ml-loading{padding:30px 18px;text-align:center;color:var(--faint);font-size:13px}
 
+  /* ===== SKELETON / SHIMMER ===== */
+  @keyframes shimmer{
+    0%{background-position:-400px 0}
+    100%{background-position:400px 0}
+  }
+  .skel-wrap{display:flex;flex-direction:column;gap:14px;padding:22px 6%;}
+  .skel-row{display:flex;max-width:72%;gap:10px;}
+  .skel-row.out{align-self:flex-end;flex-direction:row-reverse;}
+  .skel-bubble{height:42px;border-radius:14px;flex:1;min-width:120px;
+    background:linear-gradient(90deg,var(--surface-2) 25%,var(--surface-3) 50%,var(--surface-2) 75%);
+    background-size:800px 100%;
+    animation:shimmer 1.4s infinite linear;}
+  .skel-row.out .skel-bubble{background:linear-gradient(90deg,rgba(22,29,37,.18) 25%,rgba(22,29,37,.28) 50%,rgba(22,29,37,.18) 75%);background-size:800px 100%;animation:shimmer 1.4s infinite linear;}
+  [data-theme="dark"] .skel-bubble{background:linear-gradient(90deg,#1A222B 25%,#212B35 50%,#1A222B 75%);background-size:800px 100%;animation:shimmer 1.4s infinite linear;}
+  /* Media loading shimmer */
+  .media-shimmer{width:240px;height:180px;border-radius:10px;
+    background:linear-gradient(90deg,var(--surface-2) 25%,var(--surface-3) 50%,var(--surface-2) 75%);
+    background-size:800px 100%;
+    animation:shimmer 1.4s infinite linear;display:block;}
+  .audio-shimmer{width:240px;height:40px;border-radius:8px;
+    background:linear-gradient(90deg,var(--surface-2) 25%,var(--surface-3) 50%,var(--surface-2) 75%);
+    background-size:800px 100%;
+    animation:shimmer 1.4s infinite linear;display:block;}
+  [data-theme="dark"] .media-shimmer,[data-theme="dark"] .audio-shimmer{background:linear-gradient(90deg,#1A222B 25%,#212B35 50%,#1A222B 75%);background-size:800px 100%;animation:shimmer 1.4s infinite linear;}
+
   .convo{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--paper)}
   .cv-head{display:flex;align-items:center;gap:12px;padding:12px 18px;background:var(--surface);
     border-bottom:1px solid var(--line);flex:none}
@@ -1386,11 +1411,22 @@
       box.appendChild(it);
     });
   }
-  function openChat(c){
+  function openChat(c, fromPopstate){
+    // If same chat already open and rendered, skip re-init to prevent flicker
+    var isSameChat = active && active.jid === c.jid;
     active=c;
     c.unread=0;
     $("cv-blank").classList.add("hidden");$("cv-main").classList.remove("hidden");
     $("convo").classList.add("open");$("msg-list").classList.add("hide");
+
+    if (!fromPopstate) {
+      try {
+        var currentJid = history.state && history.state.activeJid;
+        if (currentJid !== c.jid) {
+          history.pushState({ activeJid: c.jid }, "");
+        }
+      } catch (e) {}
+    }
     api("POST","/chat/markChatAsRead/"+encodeURIComponent(cfg.inst),{jid:c.jid}).catch(function(e){});
     if(c.lid){
       api("POST","/chat/markChatAsRead/"+encodeURIComponent(cfg.inst),{jid:c.lid}).catch(function(e){});
@@ -1405,7 +1441,6 @@
           id: km.id
         }]
       }).catch(function(e){});
-      
       readMessageIds[km.id] = true;
       lsSet(RKEY, JSON.stringify(readMessageIds));
     }
@@ -1420,26 +1455,62 @@
     $("cv-subt").innerHTML=subtHtml;
     avatarEl($("cv-avatar"),c.name,c.pic);
     renderChatList();
+
+    // Same chat re-open: skip re-render if already shown, just silently refresh
+    if(isSameChat && msgCache[c.jid] && msgCache[c.jid].length > 0){
+      if(convoPoll)clearInterval(convoPoll);
+      convoPoll=setInterval(function(){if(!document.hidden&&view==="messages"&&active&&active.jid===c.jid)loadMessages(active,false);},9000);
+      // Background refresh without scroll-to-bottom flicker
+      loadMessages(c, false);
+      return;
+    }
+
     if(msgCache[c.jid] && msgCache[c.jid].length > 0){
-      renderMessages(msgCache[c.jid],true);
-      loadMessages(c,true);
+      // Instant render from memory cache
+      renderMessages(msgCache[c.jid], true);
+      // Then fetch fresh data in background (non-scroll so existing DOM preserved if no changes)
+      loadMessages(c, false);
     } else {
+      // Try IndexedDB cache first, show skeleton meanwhile
+      showMessageSkeleton();
       db.get("msg_" + c.jid, function(cachedMsgs) {
         if(cachedMsgs && Array.isArray(cachedMsgs) && cachedMsgs.length > 0) {
           msgCache[c.jid] = cachedMsgs;
           if (active && active.jid === c.jid) {
             renderMessages(cachedMsgs, true);
           }
-        } else {
-          if (active && active.jid === c.jid) {
-            $("cv-scroll").innerHTML='<div class="ml-loading">Loading messages…</div>';
-          }
         }
-        loadMessages(c,true);
+        // Fetch fresh from API (scroll=true to go to bottom on first open)
+        loadMessages(c, true);
       });
     }
     if(convoPoll)clearInterval(convoPoll);
     convoPoll=setInterval(function(){if(!document.hidden&&view==="messages"&&active&&active.jid===c.jid)loadMessages(active,false);},9000);
+  }
+  function showMessageSkeleton(){
+    var box=$("cv-scroll");
+    var html='<div class="skel-wrap">';
+    var patterns=[{out:false,w:'180px'},{out:true,w:'220px'},{out:false,w:'140px'},{out:true,w:'190px'},{out:false,w:'260px'},{out:true,w:'150px'},{out:false,w:'200px'},{out:true,w:'230px'}];
+    patterns.forEach(function(p){
+      html+='<div class="skel-row'+(p.out?' out':'')+'" style="max-width:'+p.w+'"><div class="skel-bubble"></div></div>';
+    });
+    html+='</div>';
+    box.innerHTML=html;
+    box.scrollTop=box.scrollHeight;
+  }
+  function closeActiveChat(fromPopstate) {
+    $("convo").classList.remove("open");
+    $("msg-list").classList.remove("hide");
+    active=null;
+    if(convoPoll)clearInterval(convoPoll);
+    renderChatList();
+    if (!fromPopstate) {
+      try {
+        if (history.state && history.state.activeJid) {
+          history.back();
+        }
+      } catch (e) {}
+    }
   }
   function loadMessages(target,scroll){
     var jid, lid=null;
@@ -1462,16 +1533,7 @@
       }
     }
     
-    if (scroll) {
-      db.get("msg_" + jid, function(cachedMsgs) {
-        if (cachedMsgs && Array.isArray(cachedMsgs) && cachedMsgs.length > 0) {
-          msgCache[jid] = cachedMsgs;
-          if (active && (active.jid === jid || active.lid === jid)) {
-            renderMessages(cachedMsgs, true);
-          }
-        }
-      });
-    }
+    // DB pre-load is handled by openChat; skip duplicate read here
     
     var p1=api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:jid}},page:1,offset:100}).catch(function(e){
       logLine("Err p1 query: "+e.message,"err");
@@ -1666,69 +1728,95 @@
     if (d.records && Array.isArray(d.records)) return d.records;
     return [];
   }
+  function buildMessageRow(m, jid, grp){
+    var kind=msgKind(m),txt=msgText(m),out=!!(m.key&&m.key.fromMe);
+    var t=new Date(tsMs(m.messageTimestamp));
+    var row=el("div","row "+(out?"out":"in")),b=el("div","bubble");
+    if(grp&&!out){var au=el("div","b-author");au.textContent=m.pushName||jidNum((m.key&&m.key.participant)||"");if(au.textContent)b.appendChild(au);}
+    if(kind==="text"){
+      var body=el("div");body.style.whiteSpace="pre-wrap";
+      if(txt === "This message was deleted"){
+        body.style.fontStyle="italic";
+        body.style.opacity="0.67";
+        body.innerHTML='<span style="font-style:normal;margin-right:4px;">🚫</span> ' + esc(txt);
+      } else {
+        body.textContent=txt||"[message]";
+        if(!txt){ console.log("Raw unrecognized message:", m); }
+      }
+      b.appendChild(body);
+    } else {
+      var slot=el("div","b-slot");b.appendChild(slot);
+      if(kind==="image"||kind==="sticker"||kind==="audio"){ensureMedia(m,slot,kind);}
+      else{
+        var lb=el("button","media-btn");
+        lb.innerHTML=(kind==="video"
+          ?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Load video'
+          :'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> '+esc(docName(m)));
+        lb.onclick=function(){ensureMedia(m,slot,kind);};
+        slot.appendChild(lb);
+      }
+      var cap=mediaCaption(m);
+      if(cap){var capd=el("div","b-cap");capd.textContent=cap;b.appendChild(capd);}
+    }
+    var foot=el("div","b-foot");
+    var meta=el("span","b-meta");meta.textContent=pad(t.getHours())+":"+pad(t.getMinutes());
+    var mid=m.key&&m.key.id;
+    var tagged=tasks.some(function(tk){return tk.source&&tk.source.msgId===mid;});
+    var tag=el("button","b-tag"+(tagged?" tagged":""));
+    tag.title=tagged?"Already saved as a task":"Make a task from this";
+    tag.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>';
+    tag.onclick=function(ev){ev.stopPropagation();
+      var title=txt||(kind==="image"?"Photo":kind==="audio"?"Voice message":kind==="video"?"Video":kind==="document"?docName(m):"Message");
+      openTaskModal({title:title,note:"",source:{chatJid:jid,chatName:active.name,msgId:mid,fromMe:out,ts:tsMs(m.messageTimestamp)}});};
+    foot.appendChild(meta);foot.appendChild(tag);b.appendChild(foot);
+    if(mid){
+      row.id="msg-"+mid;
+      if(mid===highlightMsgId){ row.classList.add("highlighted"); }
+    }
+    row.appendChild(b);
+    return {row:row, day:t.toDateString(), dayDate:t};
+  }
   function renderMessages(recs,scroll){
     var jid=active.jid;
     var visibleRecs = (recs || []).filter(function(m){ return !isSystemOrInternalMessage(m); });
     var sig=visibleRecs.length+"|"+(visibleRecs.length?((visibleRecs[visibleRecs.length-1].key||{}).id||""):"");
     if(!scroll && sig===lastSig[jid])return;   // nothing new — keep DOM (don't interrupt audio/video)
-    lastSig[jid]=sig;
     var box=$("cv-scroll");
     var stick=scroll||(box.scrollHeight-box.scrollTop-box.clientHeight<140);
-    box.innerHTML="";
-    if(!visibleRecs.length){box.innerHTML='<div class="cv-blank" style="position:static"><h3>No messages</h3></div>';return;}
-    var lastDay="",grp=isGroupJid(jid);
-    visibleRecs.forEach(function(m){
-      var t=new Date(tsMs(m.messageTimestamp));
-      var day=t.toDateString();
-      if(day!==lastDay){lastDay=day;var sep=el("div","day-sep");sep.textContent=dayLabel(t);box.appendChild(sep);}
-      var kind=msgKind(m),txt=msgText(m),out=!!(m.key&&m.key.fromMe);
-      var row=el("div","row "+(out?"out":"in")),b=el("div","bubble");
-      if(grp&&!out){var au=el("div","b-author");au.textContent=m.pushName||jidNum((m.key&&m.key.participant)||"");if(au.textContent)b.appendChild(au);}
-      if(kind==="text"){
-        var body=el("div");body.style.whiteSpace="pre-wrap";
-        if(txt === "This message was deleted"){
-          body.style.fontStyle="italic";
-          body.style.opacity="0.67";
-          body.innerHTML='<span style="font-style:normal;margin-right:4px;">🚫</span> ' + esc(txt);
-        } else {
-          body.textContent=txt||"[message]";
-          if(!txt){
-            console.log("Raw unrecognized message:", m);
+    if(!visibleRecs.length){lastSig[jid]=sig;box.innerHTML='<div class="cv-blank" style="position:static"><h3>No messages</h3></div>';return;}
+    var grp=isGroupJid(jid);
+    // INCREMENTAL UPDATE: when not forced-scroll (background poll), only append new messages
+    // This preserves already-rendered media (images/audio/video) in the DOM
+    if(!scroll && lastSig[jid] && box.children.length > 0 && !box.querySelector('.skel-wrap') && !box.querySelector('.ml-loading')){
+      var existingIds={};
+      box.querySelectorAll('.row[id]').forEach(function(el){existingIds[el.id]=true;});
+      var newMsgs=visibleRecs.filter(function(m){ return m.key && m.key.id && !existingIds['msg-'+m.key.id]; });
+      if(newMsgs.length > 0){
+        // Find the last day separator to know what day context we're in
+        var seps=box.querySelectorAll('.day-sep');
+        var lastDayText=seps.length?seps[seps.length-1].textContent:'';
+        newMsgs.forEach(function(m){
+          var built=buildMessageRow(m, jid, grp);
+          var dayLabel2=dayLabel(built.dayDate);
+          if(dayLabel2!==lastDayText){
+            var sep=el("div","day-sep");sep.textContent=dayLabel2;box.appendChild(sep);
+            lastDayText=dayLabel2;
           }
-        }
-        b.appendChild(body);
-      } else {
-        var slot=el("div","b-slot");b.appendChild(slot);
-        if(kind==="image"||kind==="sticker"||kind==="audio"){ensureMedia(m,slot,kind);}
-        else{
-          var lb=el("button","media-btn");
-          lb.innerHTML=(kind==="video"
-            ?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Load video'
-            :'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> '+esc(docName(m)));
-          lb.onclick=function(){ensureMedia(m,slot,kind);};
-          slot.appendChild(lb);
-        }
-        var cap=mediaCaption(m);
-        if(cap){var capd=el("div","b-cap");capd.textContent=cap;b.appendChild(capd);}
+          box.appendChild(built.row);
+        });
+        if(stick)box.scrollTop=box.scrollHeight;
       }
-      var foot=el("div","b-foot");
-      var meta=el("span","b-meta");meta.textContent=pad(t.getHours())+":"+pad(t.getMinutes());
-      var mid=m.key&&m.key.id;
-      var tagged=tasks.some(function(tk){return tk.source&&tk.source.msgId===mid;});
-      var tag=el("button","b-tag"+(tagged?" tagged":""));
-      tag.title=tagged?"Already saved as a task":"Make a task from this";
-      tag.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>';
-      tag.onclick=function(ev){ev.stopPropagation();
-        var title=txt||(kind==="image"?"Photo":kind==="audio"?"Voice message":kind==="video"?"Video":kind==="document"?docName(m):"Message");
-        openTaskModal({title:title,note:"",source:{chatJid:jid,chatName:active.name,msgId:mid,fromMe:out,ts:tsMs(m.messageTimestamp)}});};
-      foot.appendChild(meta);foot.appendChild(tag);b.appendChild(foot);
-      if(mid){
-        row.id="msg-"+mid;
-        if(mid===highlightMsgId){
-          row.classList.add("highlighted");
-        }
-      }
-      row.appendChild(b);box.appendChild(row);
+      lastSig[jid]=sig;
+      return;
+    }
+    // FULL RENDER: first open or forced
+    lastSig[jid]=sig;
+    box.innerHTML="";
+    var lastDay="";
+    visibleRecs.forEach(function(m){
+      var built=buildMessageRow(m, jid, grp);
+      if(built.day!==lastDay){lastDay=built.day;var sep=el("div","day-sep");sep.textContent=dayLabel(built.dayDate);box.appendChild(sep);}
+      box.appendChild(built.row);
     });
     if(highlightMsgId){
       var targetEl=$("msg-"+highlightMsgId);
@@ -1783,7 +1871,9 @@
         paint(cachedMedia);
         return;
       }
-      slot.innerHTML='<div class="media-load">Loading…</div>';
+      // Show shimmer placeholder while fetching media
+      var shimKind = (kind==="audio") ? 'audio-shimmer' : 'media-shimmer';
+      slot.innerHTML='<div class="'+shimKind+'"></div>';
       api("POST","/chat/getBase64FromMediaMessage/"+encodeURIComponent(cfg.inst),{message:m,convertToMp4:false})
       .then(function(d){
         if(!d||!d.base64)throw new Error("No media returned");
@@ -2576,6 +2666,11 @@
     cfg=c;if(!cfg.user)cfg.user="admin";lsSet(KEY,JSON.stringify(c));
     initKeys(cfg.inst);
     initMentionAutocomplete();
+    try {
+      if (history.state === null) {
+        history.replaceState({ activeJid: null }, "");
+      }
+    } catch(e) {}
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
     $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.17)";
@@ -2683,7 +2778,20 @@
   $("cv-attach").onclick=function(){$("cv-file").click();};
   $("cv-file").onchange=function(e){var f=e.target.files&&e.target.files[0];if(f)openAttachModal(f);e.target.value="";};
   $("cv-refresh").onclick=function(){if(active)loadMessages(active.jid,true);};
-  $("cv-back").onclick=function(){$("convo").classList.remove("open");$("msg-list").classList.remove("hide");active=null;if(convoPoll)clearInterval(convoPoll);renderChatList();};
+  $("cv-back").onclick=function(){closeActiveChat(false);};
+  window.addEventListener("popstate", function(e) {
+    var state = e.state;
+    if (active && (!state || state.activeJid !== active.jid)) {
+      closeActiveChat(true);
+    } else if (state && state.activeJid && (!active || active.jid !== state.activeJid)) {
+      var found = chats.concat(groups).filter(function(x){return x.jid===state.activeJid;})[0];
+      if (found) {
+        openChat(found, true);
+      } else {
+        openChat({jid:state.activeJid,name:jidNum(state.activeJid),pic:null,updatedAt:0,last:""}, true);
+      }
+    }
+  });
   $("cv-text").addEventListener("input",function(){autoGrow(this);});
   $("cv-text").addEventListener("keydown",function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendInChat();}});
   $("dial").onclick=function(){if(!document.hidden)refreshDash();};
