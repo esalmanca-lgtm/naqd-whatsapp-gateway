@@ -1229,7 +1229,7 @@
       checkUnrepliedAlerts();
       setTimeout(prefetchChatsInBackground, 1500);
       if(active){
-        var found=chats.filter(function(x){return x.jid===active.jid || x.lid===active.jid || (x.lid && x.lid===active.lid);})[0];
+        var found=chats.concat(groups).filter(function(x){return x.jid===active.jid || x.lid===active.jid || (x.lid && x.lid===active.lid);})[0];
         if(found){
           active=found;
           $("cv-subt").textContent=isGroupJid(active.jid)?"group":jidNum(active.jid);
@@ -1518,7 +1518,7 @@
     var jid, lid=null;
     if(typeof target==="string"){
       jid=target;
-      var found=chats.filter(function(x){return x.jid===jid || (x.lid && x.lid===jid);})[0];
+      var found=chats.concat(groups).filter(function(x){return x.jid===jid || (x.lid && x.lid===jid);})[0];
       if(found){
         if(found.jid===jid) lid=found.lid;
         else lid=found.jid;
