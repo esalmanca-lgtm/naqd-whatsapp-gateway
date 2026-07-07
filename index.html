@@ -334,13 +334,39 @@
 
   @media (max-width:820px){
     :root{--list-w:100%}
-    .msg-list{position:absolute;inset:0 0 0 var(--rail);z-index:10}
-    .convo{position:absolute;inset:0 0 0 var(--rail);z-index:11;display:none}
+    .shell{flex-direction: column-reverse; height: 100%; overflow: hidden;}
+    .rail{
+      width: 100% !important;
+      height: 60px !important;
+      flex-direction: row !important;
+      justify-content: space-around !important;
+      align-items: center !important;
+      padding: 0 10px !important;
+      gap: 0 !important;
+      border-right: none !important;
+      border-top: 1px solid var(--line) !important;
+    }
+    .rail .mark, .rail .spacer {
+      display: none !important;
+    }
+    .nav-btn {
+      width: 44px !important;
+      height: 44px !important;
+      border-radius: 10px !important;
+    }
+    .msg-list{position:absolute;inset:0 0 0 0;z-index:10}
+    .convo{position:absolute;inset:0 0 0 0;z-index:11;display:none}
     .convo.open{display:flex}
     .msg-list.hide{display:none}
     .cv-back{display:grid}
+    
+    /* Hide bottom bar when a chat conversation is open */
+    .shell:has(.convo.open) .rail {
+      display: none !important;
+    }
+    
     .stats{grid-template-columns:1fr 1fr}.stats .stat:last-child{grid-column:1/-1}
-    .dash,.tasks{padding:0 16px 40px}
+    .dash,.tasks{padding:20px 16px 40px}
   }
   @media (max-width:440px){.stats{grid-template-columns:1fr}}
 </style>
