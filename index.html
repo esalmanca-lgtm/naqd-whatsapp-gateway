@@ -1416,18 +1416,20 @@
     var isSameChat = active && active.jid === c.jid;
     active=c;
     c.unread=0;
-    $("cv-blank").classList.add("hidden");$("cv-main").classList.remove("hidden");
-    $("convo").classList.add("open");$("msg-list").classList.add("hide");
+    $('cv-blank').classList.add('hidden');$('cv-main').classList.remove('hidden');
+    $('convo').classList.add('open');$('msg-list').classList.add('hide');
 
+    // Push history state FIRST (before any early-return) so hardware back always works
     if (!fromPopstate) {
       try {
         var currentJid = history.state && history.state.activeJid;
         if (currentJid !== c.jid) {
-          history.pushState({ activeJid: c.jid }, "");
+          history.pushState({ activeJid: c.jid }, '', '#chat');
         }
       } catch (e) {}
     }
-    api("POST","/chat/markChatAsRead/"+encodeURIComponent(cfg.inst),{jid:c.jid}).catch(function(e){});
+
+    api('POST','/chat/markChatAsRead/'+encodeURIComponent(cfg.inst),{jid:c.jid}).catch(function(e){});
     if(c.lid){
       api("POST","/chat/markChatAsRead/"+encodeURIComponent(cfg.inst),{jid:c.lid}).catch(function(e){});
     }
@@ -2667,9 +2669,8 @@
     initKeys(cfg.inst);
     initMentionAutocomplete();
     try {
-      if (history.state === null) {
-        history.replaceState({ activeJid: null }, "");
-      }
+      // Set base state — ensures first hardware back press stays in app
+      history.replaceState({ activeJid: null }, '', '#');
     } catch(e) {}
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
@@ -2781,15 +2782,26 @@
   $("cv-back").onclick=function(){closeActiveChat(false);};
   window.addEventListener("popstate", function(e) {
     var state = e.state;
-    if (active && (!state || state.activeJid !== active.jid)) {
+    // state is null OR activeJid is null/missing = user navigated back to base
+    var isBase = !state || !state.activeJid;
+    if (isBase && active) {
+      // Hardware back pressed while chat is open — close it
       closeActiveChat(true);
-    } else if (state && state.activeJid && (!active || active.jid !== state.activeJid)) {
+    } else if (!isBase && state.activeJid && (!active || active.jid !== state.activeJid)) {
+      // Forward navigation to a chat (e.g. browser forward button)
       var found = chats.concat(groups).filter(function(x){return x.jid===state.activeJid;})[0];
       if (found) {
         openChat(found, true);
       } else {
         openChat({jid:state.activeJid,name:jidNum(state.activeJid),pic:null,updatedAt:0,last:""}, true);
       }
+    }
+  });
+  // Also intercept hash change (extra safety for some Android PWA implementations)
+  window.addEventListener('hashchange', function(e) {
+    var newHash = location.hash;
+    if (newHash === '' || newHash === '#') {
+      if (active) closeActiveChat(true);
     }
   });
   $("cv-text").addEventListener("input",function(){autoGrow(this);});
