@@ -1,4 +1,4 @@
-const CACHE_NAME = 'naqd-gateway-v4';
+const CACHE_NAME = 'naqd-gateway-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -11,16 +11,22 @@ const ASSETS = [
   './icon-maskable-512.png'
 ];
 
-// Google Fonts & jsPDF URLs to cache
+// Google Fonts, jsPDF & PDF.js (inline PDF preview) URLs to cache
 const EXTERNAL_URLS = [
   'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap',
-  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
 ];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll([...ASSETS, ...EXTERNAL_URLS]);
+      // Core app assets must cache; external CDN libs are best-effort so a CDN
+      // hiccup can't block the service-worker update.
+      return cache.addAll(ASSETS).then(() => Promise.all(
+        EXTERNAL_URLS.map((u) => cache.add(u).catch(() => {}))
+      ));
     }).then(() => self.skipWaiting())
   );
 });
