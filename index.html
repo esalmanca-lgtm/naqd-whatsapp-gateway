@@ -655,7 +655,7 @@
       });
     });
   }
-  console.log("Gateway UI Version: 1.17");
+  console.log("Gateway UI Version: 1.18");
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
   var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1", MCKEY="naqd_gw_msgcache_v1", RKEY="naqd_gw_read_ids_v1";
   var REFRESH_MS=15000;
@@ -769,6 +769,15 @@
     },{root:$('cv-scroll'), rootMargin:'300px 0px'});
     return _mediaObserver;
   }
+  /* ---- Debounced msgCache persistence (avoid blocking UI on every poll) ---- */
+  var _mcSaveTimer=null;
+  function saveMsgCacheDebounced(){
+    if(_mcSaveTimer)return;
+    _mcSaveTimer=setTimeout(function(){
+      _mcSaveTimer=null;
+      try{lsSet(MCKEY,JSON.stringify(msgCache));}catch(e){}
+    },4000);
+  }
   var dashTimer=null, deadline=0, convoPoll=null, listPoll=null, resolving={};
   var lidMap={};
   var failedLids={}, contactsMap={};
@@ -871,9 +880,14 @@
   function isGroupJid(j){return /@g\.us$/.test(j||"");}
 
   /* ---- API ---- */
-  function api(method,path,body){
+  function api(method,path,body,timeoutMs){
     var o={method:method,headers:{"apikey":cfg.key}};
     if(body!=null){o.headers["Content-Type"]="application/json";o.body=JSON.stringify(body);}
+    // Abort the request if it hangs, so a stuck socket fails fast instead of spinning forever.
+    var ctrl=(typeof AbortController!=="undefined")?new AbortController():null;
+    var timer=null;
+    if(ctrl){o.signal=ctrl.signal;timer=setTimeout(function(){try{ctrl.abort();}catch(e){}},timeoutMs||30000);}
+    var clear=function(){if(timer){clearTimeout(timer);timer=null;}};
     return fetch(cfg.url+path,o).then(function(r){
       return r.text().then(function(t){
         var d=null;try{d=t?JSON.parse(t):null;}catch(e){d=t;}
@@ -887,6 +901,10 @@
         }
         return d;
       });
+    }).then(function(res){clear();return res;},function(err){
+      clear();
+      if(err&&err.name==="AbortError"){var te=new Error("Request timeout");te.status=0;throw te;}
+      throw err;
     });
   }
   function netMsg(e){
@@ -1586,12 +1604,14 @@
       logLine("Err p1 query: "+e.message,"err");
       return [];
     });
-    var p2=lid?api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:lid}},page:1,offset:100}).catch(function(e){
-      logLine("Err p2 query: "+e.message,"err");
-      return [];
-    }):Promise.resolve([]);
-    
-    return Promise.all([p1,p2]).then(function(results){
+    // Only run the second (LID alias) query when the primary JID returned nothing.
+    // Most chats keep all history under one JID form, so this skips a full round-trip on open.
+    return p1.then(function(d1){
+      if(!lid || extractMessages(d1).length>0) return [d1,[]];
+      return api("POST","/chat/findMessages/"+encodeURIComponent(cfg.inst),{where:{key:{remoteJid:lid}},page:1,offset:100})
+        .catch(function(e){logLine("Err p2 query: "+e.message,"err");return [];})
+        .then(function(d2){return [d1,d2];});
+    }).then(function(results){
       var d1=results[0], d2=results[1];
       var recs1=extractMessages(d1).filter(function(m){return m&&m.key&&(m.key.remoteJid===jid || (lid && m.key.remoteJid===lid));});
       var recs2=lid?extractMessages(d2).filter(function(m){return m&&m.key&&(m.key.remoteJid===jid || m.key.remoteJid===lid);}):[];
@@ -1654,7 +1674,7 @@
       for(var k in msgCache){
         if(activeJids.indexOf(k)===-1)delete msgCache[k];
       }
-      lsSet(MCKEY,JSON.stringify(msgCache));
+      saveMsgCacheDebounced();
       if(uniqueRecs.length > 0){
         var lastMsg = uniqueRecs[uniqueRecs.length - 1];
         var chat = null;
@@ -1950,8 +1970,14 @@
     }
   }
 
-  function ensureMedia(m,slot,kind){
+  var MEDIA_FAIL_TTL=6*60*60*1000; // remember an unavailable/expired file for 6h before retrying
+  function isFreshFail(c){return c&&c.failed&&(Date.now()-(c.ts||0)<MEDIA_FAIL_TTL);}
+  function ensureMedia(m,slot,kind,force){
     var id=m.key&&m.key.id;
+    function showMediaError(errMsg){
+      slot.innerHTML="";var rb=el("button","media-retry");rb.textContent=(errMsg||"Couldn't load")+" — retry";
+      rb.onclick=function(){ensureMedia(m,slot,kind,true);};slot.appendChild(rb);
+    }
     // Use blob URL for display (lighter than base64 data URL in DOM)
     function displayUrl(c){
       if(c.blobUrl) return c.blobUrl;
@@ -2022,14 +2048,23 @@
         }
       }
     }
-    // 1) In-memory cache hit → instant
-    if(mediaCache[id]){paint(mediaCache[id]);return;}
+    // 1) In-memory cache hit → instant (skip a remembered failure unless forced)
+    if(mediaCache[id]){
+      var mc=mediaCache[id];
+      if(mc.failed){ if(!force&&isFreshFail(mc)){showMediaError(mc.errMsg);return;} }
+      else{ paint(mc); return; }
+    }
     // 2) IndexedDB cache → fast
     db.get("media_" + id, function(cachedMedia) {
       if(cachedMedia) {
-        cacheMedia(id, cachedMedia);
-        paint(cachedMedia);
-        return;
+        if(cachedMedia.failed){
+          // Known-bad file (e.g. expired on WhatsApp's CDN): don't re-pay the slow failing fetch.
+          if(!force&&isFreshFail(cachedMedia)){cacheMedia(id,cachedMedia);showMediaError(cachedMedia.errMsg);return;}
+        } else {
+          cacheMedia(id, cachedMedia);
+          paint(cachedMedia);
+          return;
+        }
       }
       // 3) Network fetch — via queue (max 3 concurrent)
       var shimKind = (kind==="audio") ? 'audio-shimmer' : 'media-shimmer';
@@ -2044,21 +2079,22 @@
           db.set("media_" + id, c);
           paint(c);
         }).catch(function(e){
-          var errMsg = "Couldn't load";
+          var errMsg = "Couldn't load", permanent = false;
           if (e) {
             var msg = (e.message || "").toLowerCase();
             if (msg.includes("failed to fetch stream") || msg.includes("fetch stream") || msg.includes("stream")) {
-              errMsg = "Media expired/unavailable";
+              errMsg = "Media expired/unavailable"; permanent = true;
             } else if (e.status === 404) {
-              errMsg = "Media not found";
+              errMsg = "Media not found"; permanent = true;
             } else if (e.status === 504 || e.status === 502 || msg.includes("timeout")) {
               errMsg = "Server timeout";
             } else if (e.message && e.message.length < 30 && !e.message.includes("http")) {
               errMsg = e.message;
             }
           }
-          slot.innerHTML="";var rb=el("button","media-retry");rb.textContent=errMsg+" — retry";
-          rb.onclick=function(){ensureMedia(m,slot,kind);};slot.appendChild(rb);
+          // Remember only permanent failures (expired/not-found); transient ones stay retryable.
+          if(permanent){var fr={failed:true,ts:Date.now(),errMsg:errMsg};cacheMedia(id,fr);db.set("media_"+id,fr);}
+          showMediaError(errMsg);
         });
       });
     });
@@ -2834,7 +2870,7 @@
     } catch(e) {}
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
-    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.17)";
+    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.18)";
     $("inst-name").textContent=cfg.inst + " (" + cfg.user + ")";
     var ub=$("inst-user-badge");if(ub)ub.textContent=cfg.user;
     initDial();loadTasks();updateBadge();
