@@ -1,4 +1,4 @@
-const CACHE_NAME = 'naqd-gateway-v5';
+const CACHE_NAME = 'naqd-gateway-v6';
 const ASSETS = [
   './',
   './index.html',
@@ -72,6 +72,39 @@ self.addEventListener('fetch', (e) => {
         }
         return networkResponse;
       });
+    })
+  );
+});
+
+// ===== WEB PUSH =====
+self.addEventListener('push', (e) => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch (err) {
+    try { data = { title: 'NAQD Gateway', body: e.data.text() }; } catch (e2) { data = {}; }
+  }
+  const title = data.title || 'NAQD Gateway';
+  const options = {
+    body: data.body || 'New activity',
+    icon: data.icon || './icon-192.png',
+    badge: './icon-192.png',
+    tag: data.tag || undefined,          // same tag replaces an earlier notification for that chat
+    renotify: !!data.tag,
+    data: { url: data.url || './', jid: data.jid || null },
+    vibrate: [80, 40, 80]
+  };
+  e.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const target = (e.notification.data && e.notification.data.url) || './';
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cls) => {
+      // Focus an existing window if the app is already open
+      for (const c of cls) {
+        if ('focus' in c) { c.focus(); if (c.postMessage) c.postMessage({ type: 'notif-click', data: e.notification.data }); return; }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(target);
     })
   );
 });

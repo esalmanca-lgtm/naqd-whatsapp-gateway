@@ -2,12 +2,25 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const webpush = require('web-push');
 require('dotenv').config();
 
 const PORT = process.env.PORT || 3000;
 const API_URL = process.env.API_URL || 'https://evo.naqd.in';
 const API_KEY = process.env.API_KEY || '93D6C0CFC14E-49C8-A8FC-C0300A29D250';
 const INSTANCE = process.env.INSTANCE || 'EXIM';
+
+// Web Push (VAPID) — private key MUST come from env, never hardcode it
+const VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY || '';
+const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:naqdexim@gmail.com';
+let pushReady = false;
+if (VAPID_PUBLIC && VAPID_PRIVATE) {
+  try { webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE); pushReady = true; console.log('[Push] VAPID configured — web push enabled'); }
+  catch (e) { console.error('[Push] Invalid VAPID keys, push disabled:', e.message); }
+} else {
+  console.log('[Push] No VAPID keys set — web push disabled');
+}
 
 const STATE_FILE = path.join(__dirname, 'alert_state.json');
 
@@ -25,6 +38,9 @@ let alertedMsgIds = {};
 let activeUnreplied = {};
 let lateReplies = [];
 let ownerJid = '';
+let subscriptions = [];   // web-push subscriptions
+let lastSeenMsg = {};     // jid -> last message id already notified
+let pushSeeded = false;   // don't notify for the existing backlog on first scan
 
 function loadState() {
   if (fs.existsSync(STATE_FILE)) {
@@ -34,6 +50,9 @@ function loadState() {
       activeUnreplied = data.activeUnreplied || {};
       lateReplies = data.lateReplies || [];
       ownerJid = data.ownerJid || '';
+      subscriptions = data.subscriptions || [];
+      lastSeenMsg = data.lastSeenMsg || {};
+      pushSeeded = data.pushSeeded || false;
       
       // Load saved settings if they exist in file
       if (data.config) {
@@ -48,11 +67,30 @@ function loadState() {
 
 function saveState() {
   try {
-    const data = { alertedMsgIds, activeUnreplied, lateReplies, ownerJid, config };
+    const data = { alertedMsgIds, activeUnreplied, lateReplies, ownerJid, config, subscriptions, lastSeenMsg, pushSeeded };
     fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (e) {
     console.error('[State] Failed to save state file:', e.message);
   }
+}
+
+// Send a push notification to every subscribed device; prune dead subscriptions.
+function sendPush(payload) {
+  if (!pushReady || !subscriptions.length) return;
+  const body = JSON.stringify(payload);
+  const alive = [];
+  let pruned = false;
+  Promise.all(subscriptions.map(sub =>
+    webpush.sendNotification(sub, body).then(
+      () => { alive.push(sub); },
+      (err) => {
+        if (err && (err.statusCode === 404 || err.statusCode === 410)) { pruned = true; }
+        else { alive.push(sub); console.error('[Push] send error:', err && err.statusCode); }
+      }
+    )
+  )).then(() => {
+    if (pruned) { subscriptions = alive; saveState(); console.log(`[Push] Pruned dead subs; ${subscriptions.length} remain`); }
+  });
 }
 
 const api = axios.create({
@@ -154,7 +192,30 @@ async function checkUnrepliedAlerts() {
     const timeoutMins = parseInt(config.alert_timeout, 10) || 10;
     const timeoutMs = timeoutMins * 60 * 1000;
     const currentlyUnrepliedMap = {};
-    
+
+    // ---- New-message push detection ----
+    let pushChanged = false;
+    if (pushReady && subscriptions.length) {
+      const officeNumsPush = config.alert_office.split(",").map(s => cleanJidPhone(s)).filter(Boolean);
+      chats.forEach(c => {
+        const jid = c.remoteJid || c.id;
+        const lm = c.lastMessage;
+        if (!lm || !lm.key || lm.key.fromMe) return;                 // only incoming
+        const sender = getSenderPhone(lm);
+        if (officeNumsPush.indexOf(sender) > -1) return;             // office numbers
+        if (ownerJid && sender === cleanJidPhone(ownerJid)) return;  // our own number
+        const mid = lm.key.id;
+        if (lastSeenMsg[jid] === mid) return;                        // already handled
+        lastSeenMsg[jid] = mid;
+        pushChanged = true;
+        if (!pushSeeded) return;                                     // first scan: seed only
+        if (Date.now() - tsMs(lm.messageTimestamp) > 10 * 60 * 1000) return; // ignore old backfill
+        const name = c.name || c.pushName || cleanJidPhone(jid);
+        sendPush({ title: name, body: msgText(lm) || 'New message', tag: 'msg-' + jid, url: './', jid });
+      });
+      if (!pushSeeded) { pushSeeded = true; pushChanged = true; console.log('[Push] Seeded last-seen messages (no backlog notifications)'); }
+    }
+
     chats.forEach(c => {
       const jid = c.remoteJid || c.id;
       if (isChatUnreplied(c)) {
@@ -254,6 +315,7 @@ async function checkUnrepliedAlerts() {
               console.log(`[Alerter] Alert sent successfully!`);
               alertedMsgIds[mid] = true;
               alertChanged = true;
+              sendPush({ title: '⚠️ Unreplied: ' + name, body: (previewText || 'No reply sent yet').slice(0, 120), tag: 'unreplied-' + (c.remoteJid || c.id), url: './', jid: (c.remoteJid || c.id) });
             } catch (err) {
               console.error(`[Alerter] Failed to send alert: ${err.message}`);
             }
@@ -262,7 +324,7 @@ async function checkUnrepliedAlerts() {
       }
     }
     
-    if (stateChanged || alertChanged) {
+    if (stateChanged || alertChanged || pushChanged) {
       const keys = Object.keys(alertedMsgIds);
       if (keys.length > 500) {
         const newAlerted = {};
@@ -292,7 +354,38 @@ const server = http.createServer((req, res) => {
 
   const url = req.url;
 
-  if (url === '/api/settings' && req.method === 'GET') {
+  if (url === '/api/vapid-public-key' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ key: VAPID_PUBLIC }));
+  } else if (url === '/api/subscribe' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        const sub = data.subscription || data;
+        if (!sub || !sub.endpoint) { res.writeHead(400); res.end('Invalid subscription'); return; }
+        const exists = subscriptions.find(s => s.endpoint === sub.endpoint);
+        if (!exists) { subscriptions.push(sub); saveState(); console.log(`[Push] New subscription (${subscriptions.length} total)`); }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok', count: subscriptions.length }));
+      } catch (e) { res.writeHead(400); res.end('Invalid JSON'); }
+    });
+  } else if (url === '/api/unsubscribe' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        const ep = data.endpoint || (data.subscription && data.subscription.endpoint);
+        const before = subscriptions.length;
+        subscriptions = subscriptions.filter(s => s.endpoint !== ep);
+        if (subscriptions.length !== before) saveState();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok', count: subscriptions.length }));
+      } catch (e) { res.writeHead(400); res.end('Invalid JSON'); }
+    });
+  } else if (url === '/api/settings' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(config));
   } else if (url === '/api/settings' && req.method === 'POST') {
