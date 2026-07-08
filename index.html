@@ -703,7 +703,7 @@
       });
     });
   }
-  console.log("Gateway UI Version: 1.23");
+  console.log("Gateway UI Version: 1.24");
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
   var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1", MCKEY="naqd_gw_msgcache_v1", RKEY="naqd_gw_read_ids_v1";
   var REFRESH_MS=15000;
@@ -830,6 +830,7 @@
   var lidMap={};
   var failedLids={}, contactsMap={};
   var chatsGroups=[], apiGroups=[], highlightMsgId=null;
+  var chatsLoaded=false, groupsLoaded=false;   // distinguish "still loading" from "loaded but empty"
   var users=[{username:"admin", password:""}], access={}, categories=["Personal", "Exim", "Naqd"], chatCategories={};
   var readMessageIds={};
   var ownerJid = "";
@@ -937,7 +938,7 @@
     // Abort the request if it hangs, so a stuck socket fails fast instead of spinning forever.
     var ctrl=(typeof AbortController!=="undefined")?new AbortController():null;
     var timer=null;
-    if(ctrl){o.signal=ctrl.signal;timer=setTimeout(function(){try{ctrl.abort();}catch(e){}},timeoutMs||30000);}
+    if(ctrl){o.signal=ctrl.signal;timer=setTimeout(function(){try{ctrl.abort();}catch(e){}},timeoutMs||45000);}
     var clear=function(){if(timer){clearTimeout(timer);timer=null;}};
     return fetch(cfg.url+path,o).then(function(r){
       return r.text().then(function(t){
@@ -1264,6 +1265,7 @@
   }
   function loadChats(){
     api("POST","/chat/findChats/"+encodeURIComponent(cfg.inst),{}).then(function(d){
+      chatsLoaded=true;
       var arr=Array.isArray(d)?d:(d&&(d.records||d.chats))||[];
       var map={};
       var parsedChatGroups=[];
@@ -1433,7 +1435,10 @@
         }
       });
     }).catch(function(e){
-      $("chat-list").innerHTML='<div class="ml-empty">'+esc(netMsg(e))+'</div>';
+      // Non-destructive: a failed refresh must NOT wipe an already-populated list.
+      if(!chats.length && !groups.length){
+        $("chat-list").innerHTML='<div class="ml-empty">'+esc(netMsg(e))+'</div>';
+      }
     });
   }
   function combineGroups(){
@@ -1459,8 +1464,10 @@
     checkUnrepliedAlerts();
     if(chatTab==="groups" || chatTab==="unreplied")renderChatList();
   }
-  function loadGroups(){
+  function loadGroups(attempt){
+    attempt = attempt || 0;
     api("GET","/group/fetchAllGroups/"+encodeURIComponent(cfg.inst)+"?getParticipants=false").then(function(d){
+      groupsLoaded=true;
       var arr=Array.isArray(d)?d:(d&&(d.groups||d.records))||[];
       apiGroups=arr.map(function(g){
         return {jid:g.id,name:g.subject||"Group",pic:g.pictureUrl||null,
@@ -1469,14 +1476,24 @@
       combineGroups();
     }).catch(function(e){
       combineGroups();
-      if(chatTab==="groups" && !groups.length){
-        $("chat-list").innerHTML='<div class="ml-empty">'+esc(netMsg(e))+'</div>';
+      if(groups.length) return;   // already have groups (cache/chats) — ignore a failed refresh
+      // Group fetch is heavy and occasionally times out — retry quietly instead of flashing an error.
+      if(attempt < 4){
+        if(chatTab==="groups") $("chat-list").innerHTML='<div class="ml-loading">Loading groups…</div>';
+        setTimeout(function(){ loadGroups(attempt+1); }, 4000);
+      } else {
+        groupsLoaded=true;
+        if(chatTab==="groups") renderChatList();
       }
     });
   }
   function currentList(){
     var src;
-    if(chatTab === "chats" || chatTab === "chatsGroups"){
+    if(searchTerm){
+      // When searching, look across ALL chats + groups regardless of the active tab
+      var seen={}; src=[];
+      chats.concat(groups).forEach(function(c){ if(c&&c.jid&&!seen[c.jid]){seen[c.jid]=1;src.push(c);} });
+    }else if(chatTab === "chats" || chatTab === "chatsGroups"){
       src=chats;
     }else if(chatTab==="groups"){
       src=groups;
@@ -1501,10 +1518,12 @@
   function renderChatList(){
     var box=$("chat-list"),list=currentList();box.innerHTML="";
     if(!list.length){
-      var emptyText = "No chats yet.";
-      if(chatTab==="groups")emptyText="No groups found.";
-      else if(chatTab==="unreplied")emptyText="No unreplied client messages.";
-      else if(chatTab!=="chats")emptyText="No chats in " + chatTab + ".";
+      var emptyText;
+      if(searchTerm) emptyText='No chats or groups match "'+esc(searchTerm)+'".';
+      else if(chatTab==="groups") emptyText=groupsLoaded?"No groups found.":"Loading groups…";
+      else if(chatTab==="unreplied") emptyText="No unreplied client messages.";
+      else if(chatTab==="chats") emptyText=chatsLoaded?"No chats yet.":"Loading…";
+      else emptyText="No chats in "+chatTab+".";
       box.innerHTML='<div class="ml-empty">'+emptyText+'</div>';
       return;
     }
@@ -1752,7 +1771,11 @@
       }
       if(active && (active.jid === jid || active.lid === jid || (lid && (active.jid === lid || active.lid === lid))))renderMessages(uniqueRecs,scroll);
     }).catch(function(e){
-      if(active && (active.jid === jid || active.lid === jid || (lid && (active.jid === lid || active.lid === lid))))$("cv-scroll").innerHTML='<div class="ml-empty">'+esc(netMsg(e))+'</div>';
+      // Non-destructive: keep already-rendered messages; only show an error if nothing is shown yet.
+      if(active && (active.jid === jid || active.lid === jid || (lid && (active.jid === lid || active.lid === lid)))){
+        var box=$("cv-scroll");
+        if(box && !box.querySelector('.row')) box.innerHTML='<div class="ml-empty">'+esc(netMsg(e))+'</div>';
+      }
     });
   }
   function prefetchChatsInBackground() {
@@ -2806,6 +2829,8 @@
     chatTab=tab;
     renderTabs();
     renderChatList();
+    // Self-heal: if Groups (or a category that needs groups) is opened but groups never loaded, retry.
+    if((tab==="groups" || (tab!=="chats" && tab!=="chatsGroups")) && !groups.length) loadGroups();
   }
   function openAddTabModal(){
     openModal('<h3>Add Category Tab</h3><p class="sub">Create a new tab to group chats/groups.</p><div class="field"><label>Category Name</label><input id="new-cat-name" class="input" placeholder="e.g. Exim" autocomplete="off"></div><div class="modal-actions"><button class="btn" id="nc-cat-cancel">Cancel</button><button class="btn primary" id="nc-cat-go">Create</button></div>');
@@ -3205,7 +3230,7 @@
     } catch(e) {}
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
-    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.23)";
+    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.24)";
     $("inst-name").textContent=cfg.inst + " (" + cfg.user + ")";
     var ub=$("inst-user-badge");if(ub)ub.textContent=cfg.user;
     initDial();loadTasks();updateBadge();
