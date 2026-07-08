@@ -1527,6 +1527,7 @@
       convoPoll=setInterval(function(){if(!document.hidden&&view==="messages"&&active&&active.jid===c.jid)loadMessages(active,false);},9000);
       // Background refresh without scroll-to-bottom flicker
       loadMessages(c, false);
+      if(highlightMsgId)scrollToHighlight();
       return;
     }
 
@@ -1958,13 +1959,7 @@
       box.appendChild(built.row);
     });
     if(highlightMsgId){
-      var targetEl=$("msg-"+highlightMsgId);
-      if(targetEl){
-        setTimeout(function(){
-          targetEl.scrollIntoView({behavior:"smooth",block:"center"});
-          highlightMsgId=null;
-        },150);
-      }
+      scrollToHighlight();
     } else if(stick){
       box.scrollTop=box.scrollHeight;
     }
@@ -2340,7 +2335,7 @@
           status:"open",createdAt:Date.now(),source:seed.source||null});
       }
       saveTasks();closeModal();renderTasks();
-      if(view==="messages"&&active)renderMessages(msgCache[active.jid]||[],false);
+      if(view==="messages"&&active)refreshTagStates();
       toast(seed.id?"Task updated":"Task added","ok");
     };
   }
@@ -2387,10 +2382,33 @@
       if(t.assignedTo){var asg=el("span","tk-badge");asg.style.background="var(--surface-3)";asg.style.color="var(--ink)";asg.textContent="👤 "+t.assignedTo;meta.appendChild(asg);}
       body.appendChild(meta);
       var x=el("button","tk-x");x.title="Delete";x.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
-      x.onclick=function(){tasks=tasks.filter(function(z){return z.id!==t.id;});saveTasks();renderTasks();if(view==="messages"&&active)renderMessages(msgCache[active.jid]||[],false);};
+      x.onclick=function(){tasks=tasks.filter(function(z){return z.id!==t.id;});saveTasks();renderTasks();if(view==="messages"&&active)refreshTagStates();};
       ttl.style.cursor="pointer";ttl.onclick=function(){openTaskModal(t);};
       c.appendChild(chk);c.appendChild(body);c.appendChild(x);box.appendChild(c);
     });
+  }
+  // After tagging/untagging, refresh the checkmark state on already-rendered rows
+  // (renderMessages short-circuits when the message list is unchanged, so it can't do this).
+  function refreshTagStates(){
+    var box=$("cv-scroll"); if(!box)return;
+    box.querySelectorAll('.row[id^="msg-"]').forEach(function(row){
+      var mid=row.id.slice(4);
+      var btn=row.querySelector('.b-tag'); if(!btn)return;
+      var tagged=tasks.some(function(tk){return tk.source&&tk.source.msgId===mid;});
+      btn.classList.toggle('tagged',tagged);
+      btn.title=tagged?"Already saved as a task":"Make a task from this";
+    });
+  }
+  // Scroll to and flash a tagged message; tells the user if it isn't in the loaded window.
+  function scrollToHighlight(){
+    if(!highlightMsgId)return;
+    var id=highlightMsgId; highlightMsgId=null;
+    setTimeout(function(){
+      var elx=$("msg-"+id);
+      if(!elx){toast("Message not in recent view");return;}
+      elx.classList.remove("highlighted"); void elx.offsetWidth; elx.classList.add("highlighted");
+      elx.scrollIntoView({behavior:"smooth",block:"center"});
+    },150);
   }
   function jumpToChat(jid,name,msgId){
     highlightMsgId=msgId||null;
