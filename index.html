@@ -703,7 +703,7 @@
       });
     });
   }
-  console.log("Gateway UI Version: 1.22");
+  console.log("Gateway UI Version: 1.23");
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
   var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1", MCKEY="naqd_gw_msgcache_v1", RKEY="naqd_gw_read_ids_v1";
   var REFRESH_MS=15000;
@@ -2898,6 +2898,7 @@
     html += '<label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Push Notifications</label>';
     html += '<p class="sub" style="margin:-4px 0 8px">Get alerted about new messages and unreplied chats even when the app is closed.</p>';
     html += '<button class="btn full" id="btn-push-toggle">Checking…</button>';
+    html += '<button class="btn full" id="btn-push-test" style="margin-top:8px;display:none">Send test notification</button>';
     html += '<p class="sub" id="push-note" style="margin:8px 0 0;font-size:11px"></p>';
     html += '</div>';
     html += '<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">';
@@ -3204,7 +3205,7 @@
     } catch(e) {}
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
-    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.22)";
+    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.23)";
     $("inst-name").textContent=cfg.inst + " (" + cfg.user + ")";
     var ub=$("inst-user-badge");if(ub)ub.textContent=cfg.user;
     initDial();loadTasks();updateBadge();
@@ -3655,16 +3656,27 @@
     navigator.serviceWorker.ready.then(function(reg){
       return reg.pushManager.getSubscription();
     }).then(function(sub){
+      var testBtn=$("btn-push-test");
       if(sub && Notification.permission==="granted"){
         btn.textContent="Disable notifications"; btn.classList.remove("primary");
         btn.onclick=disablePush;
         if(note)note.textContent="Notifications are ON for this device.";
+        if(testBtn){ testBtn.style.display=""; testBtn.onclick=sendTestPush; }
       } else {
         btn.textContent="Enable notifications"; btn.classList.add("primary");
         btn.onclick=enablePush;
         if(note)note.textContent = Notification.permission==="denied" ? "Notifications are blocked in your browser settings — allow them there first." : "";
+        if(testBtn) testBtn.style.display="none";
       }
     }).catch(function(){ btn.textContent="Enable notifications"; btn.onclick=enablePush; });
+  }
+  function sendTestPush(){
+    var b=$("btn-push-test"); if(b){b.disabled=true;b.textContent="Sending…";}
+    fetch(pushBase()+"/api/test-push",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})
+    .then(function(r){return r.json();})
+    .then(function(d){ toast(d&&d.sent ? "Test sent to "+d.sent+" device(s)" : "No subscribed devices","ok"); })
+    .catch(function(e){ toast("Test failed","err"); logLine("[Push] test: "+((e&&e.message)||e),"err"); })
+    .then(function(){ if(b){b.disabled=false;b.textContent="Send test notification";} });
   }
   function enablePush(){
     if(!pushSupported())return;

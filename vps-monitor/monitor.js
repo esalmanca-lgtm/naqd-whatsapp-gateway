@@ -385,6 +385,11 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ status: 'ok', count: subscriptions.length }));
       } catch (e) { res.writeHead(400); res.end('Invalid JSON'); }
     });
+  } else if (url === '/api/test-push' && req.method === 'POST') {
+    if (!pushReady) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ status: 'push-disabled', sent: 0 })); return; }
+    sendPush({ title: '✅ NAQD Gateway', body: 'Test notification — push is working!', tag: 'test-' + Date.now(), url: './' });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', sent: subscriptions.length }));
   } else if (url === '/api/settings' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(config));
