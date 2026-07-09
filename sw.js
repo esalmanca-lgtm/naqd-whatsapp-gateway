@@ -1,4 +1,4 @@
-const CACHE_NAME = 'naqd-gateway-v8';
+const CACHE_NAME = 'naqd-gateway-v9';
 const ASSETS = [
   './',
   './index.html',
@@ -97,13 +97,16 @@ self.addEventListener('push', (e) => {
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const target = (e.notification.data && e.notification.data.url) || './';
+  const jid = (e.notification.data && e.notification.data.jid) || null;
+  const base = (e.notification.data && e.notification.data.url) || './';
+  const target = jid ? (base + '#openchat=' + encodeURIComponent(jid)) : base;
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cls) => {
-      // Focus an existing window if the app is already open
+      // App already open → focus it and tell it which chat to open
       for (const c of cls) {
-        if ('focus' in c) { c.focus(); if (c.postMessage) c.postMessage({ type: 'notif-click', data: e.notification.data }); return; }
+        if ('focus' in c) { c.focus(); if (c.postMessage) c.postMessage({ type: 'open-chat', jid: jid }); return; }
       }
+      // App closed → open it with the chat in the URL hash
       if (self.clients.openWindow) return self.clients.openWindow(target);
     })
   );

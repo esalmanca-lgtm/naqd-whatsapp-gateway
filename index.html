@@ -702,10 +702,14 @@
         console.log('PWA ServiceWorker registration failed: ', err);
       });
     });
+    // Notification tap (app already open) -> open the chat it points to
+    navigator.serviceWorker.addEventListener('message', function(e){
+      if(e.data && e.data.type==='open-chat' && e.data.jid){ try{ openChatByJid(e.data.jid); }catch(err){} }
+    });
   }
-  console.log("Gateway UI Version: 1.24");
+  console.log("Gateway UI Version: 1.25");
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
-  var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1", MCKEY="naqd_gw_msgcache_v1", RKEY="naqd_gw_read_ids_v1";
+  var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1", MCKEY="naqd_gw_msgcache_v1", RKEY="naqd_gw_read_ids_v1", NMKEY="naqd_gw_names_v1";
   var REFRESH_MS=15000;
   var appStartupTime = Date.now();
   var cfg=null, view="messages", chatTab="chats", taskFilter="open";
@@ -831,6 +835,7 @@
   var failedLids={}, contactsMap={};
   var chatsGroups=[], apiGroups=[], highlightMsgId=null;
   var chatsLoaded=false, groupsLoaded=false;   // distinguish "still loading" from "loaded but empty"
+  var nameCache={};   // number -> resolved display name (persisted, so names never regress to a raw number)
   var users=[{username:"admin", password:""}], access={}, categories=["Personal", "Exim", "Naqd"], chatCategories={};
   var readMessageIds={};
   var ownerJid = "";
@@ -851,7 +856,8 @@
     CCKEY = "naqd_gw_chat_categories_v1" + suffix;
     MCKEY = "naqd_gw_msgcache_v1" + suffix;
     RKEY = "naqd_gw_read_ids_v1" + suffix;
-    
+    NMKEY = "naqd_gw_names_v1" + suffix;
+
     var migrate = function(oldK, newK) {
       try {
         var oldVal = lsGet(oldK);
@@ -894,6 +900,7 @@
     chatCategories={}; try{var savedChatCats=JSON.parse(lsGet(CCKEY)); if(savedChatCats&&typeof savedChatCats==="object")chatCategories=savedChatCats;}catch(e){}
     msgCache={}; try{msgCache=JSON.parse(lsGet(MCKEY)||"{}");}catch(e){}
     readMessageIds={}; try{readMessageIds=JSON.parse(lsGet(RKEY)||"{}");}catch(e){}
+    nameCache={}; try{nameCache=JSON.parse(lsGet(NMKEY)||"{}");}catch(e){}
   }
 
   /* ---- storage ---- */
@@ -910,6 +917,12 @@
   function tsMs(t){t=Number(t)||0;return t<1e12?t*1000:t;}
   function digits(s){return (s||"").replace(/[^0-9]/g,"");}
   function jidNum(j){return (j||"").replace(/@.*/,"");}
+  /* ---- persistent name cache: once a real name is known for a number, keep it ---- */
+  function isRealName(n){ return !!n && !/^\+?[0-9\s\-]{5,}$/.test(String(n).trim()); }
+  var _nmSaveTimer=null;
+  function saveNameCache(){ if(_nmSaveTimer)return; _nmSaveTimer=setTimeout(function(){_nmSaveTimer=null;try{lsSet(NMKEY,JSON.stringify(nameCache));}catch(e){}},2000); }
+  function rememberName(num, name){ num=digits(num); if(!num||!isRealName(name))return; name=String(name).trim(); if(nameCache[num]!==name){nameCache[num]=name;saveNameCache();} }
+  function nameOf(num){ num=digits(num); return num?(nameCache[num]||null):null; }
   function formatChatTime(time) {
     if (!time) return "";
     var now = new Date();
@@ -1239,6 +1252,7 @@
         if(name){
           var num=jidNum(jid);
           contactsMap[num]={name:name,pic:pic,jid:jid};
+          rememberName(num, name);
         }
       });
     }).catch(function(e){
@@ -1312,7 +1326,9 @@
         var contact=contactsMap[num]||(lid&&contactsMap[jidNum(lid)]);
         if(!name&&contact)name=contact.name;
         if(!pic&&contact)pic=contact.pic;
-        
+        if(name) rememberName(num, name);
+        else name = nameOf(num) || (lid?nameOf(jidNum(lid)):"") || "";
+
         var msgTime = (c.lastMessage && c.lastMessage.messageTimestamp) ? tsMs(c.lastMessage.messageTimestamp) : 0;
         var dbTime = c.updatedAt ? Date.parse(c.updatedAt) : 0;
         var updatedAt = Math.max(msgTime, dbTime);
@@ -1515,9 +1531,33 @@
     var q=searchTerm.toLowerCase();
     return src.filter(function(c){return (c.name||"").toLowerCase().indexOf(q)>-1||c.jid.indexOf(q)>-1||(c.lid&&c.lid.indexOf(q)>-1);});
   }
+  var _chatNodes={};   // jid -> live DOM node, so we reuse rows instead of rebuilding (no flicker)
+  function chatSig(c){
+    var isActive=!!(active&&active.jid===c.jid);
+    return [c.name||"",c.last||"",c.updatedAt||0,c.unread||0,isActive?1:0,c.pic||""].join("");
+  }
+  function applyChatItem(it,c){
+    it._chat=c;
+    var isActive=!!(active&&active.jid===c.jid);
+    it.classList.toggle("active",isActive);
+    avatarEl(it._av,c.name,c.pic);
+    var time=c.updatedAt?new Date(c.updatedAt):null;
+    var unreadHtml="",timeClass="ci-time";
+    if(c.unread>0 && !isActive){ unreadHtml='<span class="ci-unread">'+c.unread+'</span>'; timeClass+=" highlight"; }
+    it._body.innerHTML='<div class="ci-top"><span class="ci-name">'+esc(c.name)+'</span><span class="'+timeClass+'">'+(time?formatChatTime(time):"")+'</span></div><div class="ci-sub-row"><div class="ci-sub">'+esc(c.last||jidNum(c.jid))+'</div>'+unreadHtml+'</div>';
+  }
+  function buildChatItem(c){
+    var it=el("div","chat-item");
+    it._av=el("div","avatar"); it._body=el("div","ci-body");
+    it.appendChild(it._av); it.appendChild(it._body);
+    it.onclick=function(){ openChat(it._chat); };
+    applyChatItem(it,c); it._sig=chatSig(c);
+    return it;
+  }
   function renderChatList(){
-    var box=$("chat-list"),list=currentList();box.innerHTML="";
+    var box=$("chat-list"),list=currentList();
     if(!list.length){
+      _chatNodes={};
       var emptyText;
       if(searchTerm) emptyText='No chats or groups match "'+esc(searchTerm)+'".';
       else if(chatTab==="groups") emptyText=groupsLoaded?"No groups found.":"Loading groups…";
@@ -1527,21 +1567,21 @@
       box.innerHTML='<div class="ml-empty">'+emptyText+'</div>';
       return;
     }
+    // Clear any placeholder (empty/loading) that was shown before real rows
+    if(box.querySelector('.ml-empty,.ml-loading')){ box.innerHTML=""; _chatNodes={}; }
+    // Reconcile: reuse existing rows, only touch what changed — no full rebuild = no flicker
+    var seen={}, prev=null;
     list.forEach(function(c){
-      var it=el("div","chat-item"+(active&&active.jid===c.jid?" active":""));
-      var av=el("div","avatar");avatarEl(av,c.name,c.pic);
-      var body=el("div","ci-body");
-      var time=c.updatedAt?new Date(c.updatedAt):null;
-      var unreadHtml = '';
-      var timeClass = 'ci-time';
-      if(c.unread > 0 && !(active && active.jid === c.jid)){
-        unreadHtml = '<span class="ci-unread">' + c.unread + '</span>';
-        timeClass += ' highlight';
-      }
-      body.innerHTML='<div class="ci-top"><span class="ci-name">'+esc(c.name)+'</span><span class="'+timeClass+'">'+(time?formatChatTime(time):"")+'</span></div><div class="ci-sub-row"><div class="ci-sub">'+esc(c.last||jidNum(c.jid))+'</div>'+unreadHtml+'</div>';
-      it.appendChild(av);it.appendChild(body);
-      it.onclick=function(){openChat(c);};
-      box.appendChild(it);
+      seen[c.jid]=1;
+      var node=_chatNodes[c.jid], sig=chatSig(c);
+      if(!node){ node=buildChatItem(c); _chatNodes[c.jid]=node; }
+      else{ node._chat=c; if(node._sig!==sig){ applyChatItem(node,c); node._sig=sig; } }
+      var expected=prev?prev.nextSibling:box.firstChild;
+      if(node!==expected) box.insertBefore(node,expected);
+      prev=node;
+    });
+    Object.keys(_chatNodes).forEach(function(jid){
+      if(!seen[jid]){ var n=_chatNodes[jid]; if(n&&n.parentNode)n.parentNode.removeChild(n); delete _chatNodes[jid]; }
     });
   }
   function openChat(c, fromPopstate){
@@ -1907,7 +1947,13 @@
     var kind=msgKind(m),txt=msgText(m),out=!!(m.key&&m.key.fromMe);
     var t=new Date(tsMs(m.messageTimestamp));
     var row=el("div","row "+(out?"out":"in")),b=el("div","bubble");
-    if(grp&&!out){var au=el("div","b-author");au.textContent=m.pushName||jidNum((m.key&&m.key.participant)||"");if(au.textContent)b.appendChild(au);}
+    if(grp&&!out){
+      var partNum=jidNum((m.key&&m.key.participant)||(m.key&&m.key.participantAlt)||"");
+      var pn=(m.pushName||"").trim();
+      if(pn) rememberName(partNum, pn);
+      var au=el("div","b-author");au.textContent=pn||nameOf(partNum)||partNum;
+      if(au.textContent)b.appendChild(au);
+    }
     var qEl=buildQuoteEl(m); if(qEl)b.appendChild(qEl);
     if(kind==="text"){
       var body=el("div");body.style.whiteSpace="pre-wrap";
@@ -2695,6 +2741,13 @@
     var found=(isGroupJid(jid)?groups:chats).filter(function(c){return c.jid===jid;})[0];
     openChat(found||{jid:jid,name:name||jidNum(jid),pic:null,updatedAt:0,last:""});
   }
+  // Open a chat from a push-notification tap (by jid); resolves the cached name if we have it.
+  function openChatByJid(jid){
+    if(!jid || !cfg)return;
+    setView("messages");
+    var found=chats.concat(groups).filter(function(c){return c.jid===jid || c.lid===jid;})[0];
+    openChat(found||{jid:jid,name:(isGroupJid(jid)?jidNum(jid):(nameOf(jidNum(jid))||jidNum(jid))),pic:null,updatedAt:0,last:""});
+  }
 
   /* ============ MODAL ============ */
   function openModal(html){$("modal").innerHTML=html;$("scrim").classList.add("show");}
@@ -3230,7 +3283,7 @@
     } catch(e) {}
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
-    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.24)";
+    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.25)";
     $("inst-name").textContent=cfg.inst + " (" + cfg.user + ")";
     var ub=$("inst-user-badge");if(ub)ub.textContent=cfg.user;
     initDial();loadTasks();updateBadge();
@@ -3257,6 +3310,20 @@
     });
     
     setView("messages");
+    // Opened fresh from a notification tap (#openchat=<jid>) -> open that chat once data is ready
+    try {
+      var hm=(location.hash||"").match(/openchat=([^&]+)/);
+      if(hm){
+        var wantJid=decodeURIComponent(hm[1]);
+        history.replaceState({ activeJid: null }, '', '#');
+        var tries=0;
+        var openTimer=setInterval(function(){
+          tries++;
+          var ready=chats.concat(groups).some(function(c){return c.jid===wantJid||c.lid===wantJid;});
+          if(ready || tries>=12){ clearInterval(openTimer); openChatByJid(wantJid); }
+        },400);
+      }
+    } catch(e){}
     // refresh chat list periodically
     if(listPoll)clearInterval(listPoll);
     listPoll=setInterval(function(){loadChats();},30000);
