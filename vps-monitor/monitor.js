@@ -296,6 +296,7 @@ async function checkUnrepliedAlerts() {
             const previewText = msgText(lm);
             
             const text = config.alert_format
+              .replace(/\\n/g, '\n')   // .env stores newlines as literal "\n" — turn them into real line breaks
               .replace(/{name}/g, name)
               .replace(/{jid}/g, c.remoteJid || c.id)
               .replace(/{timeout}/g, timeoutMins)

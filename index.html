@@ -707,7 +707,7 @@
       if(e.data && e.data.type==='open-chat' && e.data.jid){ try{ openChatByJid(e.data.jid); }catch(err){} }
     });
   }
-  console.log("Gateway UI Version: 1.26");
+  console.log("Gateway UI Version: 1.27");
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
   var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1", MCKEY="naqd_gw_msgcache_v1", RKEY="naqd_gw_read_ids_v1", NMKEY="naqd_gw_names_v1";
   var REFRESH_MS=15000;
@@ -1635,6 +1635,7 @@
     }
     $("cv-subt").innerHTML=subtHtml;
     avatarEl($("cv-avatar"),c.name,c.pic);
+    if(isGroupJid(c.jid)) updateGroupParticipants(c.jid);   // for @mention of group members
     // Defer the (heavy) full chat-list rebuild so the message view paints first — removes the open-chat lag.
     setTimeout(renderChatList, 0);
 
@@ -1787,6 +1788,7 @@
         }
       }
       msgCache[jid]=uniqueRecs;
+      if(isGroupJid(jid)) updateGroupParticipants(jid);   // learn group members from message senders
       db.set("msg_" + jid, uniqueRecs);
       var activeJids = chats.slice(0, 20).map(function(c){return c.jid;});
       for(var k in msgCache){
@@ -3182,50 +3184,58 @@
     hideMentionDropdown();
   }
 
+  // Who can be @mentioned: group members when in a group, otherwise app users (for notes)
+  function mentionPool(){
+    if(active && isGroupJid(active.jid) && groupParticipants[active.jid] && groupParticipants[active.jid].length){
+      return groupParticipants[active.jid].map(function(p){ return { name:p.name, sub:(p.name!==p.number?p.number:"") }; });
+    }
+    return users.map(function(u){ var n=typeof u==="string"?u:u.username; return { name:n, sub:"" }; });
+  }
   function showMentionDropdown(q, atPos) {
     var dd = $("mention-dropdown");
     if (!dd) return;
     q = q.toLowerCase();
     currentAtPos = atPos;
-    
-    var matches = users.filter(function(u) {
-      var name = typeof u === "string" ? u : u.username;
-      return name.toLowerCase().includes(q);
-    });
-    
-    if (matches.length === 0) {
-      hideMentionDropdown();
-      return;
-    }
-    
+    var matches = mentionPool().filter(function(p) { return (p.name||"").toLowerCase().indexOf(q)>-1 || (p.sub||"").indexOf(q)>-1; }).slice(0,50);
+    if (matches.length === 0) { hideMentionDropdown(); return; }
     currentMentions = matches;
     dd.innerHTML = "";
     mentionIndex = Math.min(mentionIndex, matches.length - 1);
     if (mentionIndex < 0 && matches.length > 0) mentionIndex = 0;
-    
-    matches.forEach(function(u, idx) {
-      var name = typeof u === "string" ? u : u.username;
+    matches.forEach(function(p, idx) {
       var item = el("div");
-      item.style.padding = "8px 12px";
-      item.style.fontSize = "13px";
-      item.style.cursor = "pointer";
-      item.style.color = "var(--ink)";
-      if (idx === mentionIndex) {
-        item.style.background = "var(--surface-3)";
-      }
-      item.textContent = "@" + name;
-      item.onmouseenter = function() {
-        mentionIndex = idx;
-        showMentionDropdown(q, atPos);
-      };
-      item.onclick = function(e) {
-        e.preventDefault();
-        insertMention(name);
-      };
+      item.style.padding = "8px 12px"; item.style.fontSize = "13px"; item.style.cursor = "pointer"; item.style.color = "var(--ink)";
+      if (idx === mentionIndex) item.style.background = "var(--surface-3)";
+      item.innerHTML = '<span>@'+esc(p.name)+'</span>' + (p.sub?(' <span style="color:var(--faint);font-size:11.5px">'+esc(p.sub)+'</span>'):'');
+      item.onmouseenter = function() { mentionIndex = idx; showMentionDropdown(q, atPos); };
+      item.onclick = function(e) { e.preventDefault(); insertMention(p.name); };
       dd.appendChild(item);
     });
-    
     dd.classList.remove("hidden");
+  }
+  function mergeParticipant(jid, pj, num, nm){
+    if(!num) return;
+    var list=groupParticipants[jid]||(groupParticipants[jid]=[]);
+    if(nm) rememberName(num, nm);
+    var name=nameOf(num)||nm||num;
+    for(var i=0;i<list.length;i++){ if(list[i].number===num){ if(pj&&!list[i].jid)list[i].jid=pj; list[i].name=name; return; } }
+    list.push({ jid: pj||(num+"@s.whatsapp.net"), number:num, name:name });
+  }
+  // Group members for @mentions. The group-participants API 404/500s on this server,
+  // so derive members from the group's loaded messages (reliable) + a best-effort API call.
+  function updateGroupParticipants(jid){
+    if(!jid || !isGroupJid(jid) || !cfg) return;
+    (msgCache[jid]||[]).forEach(function(m){
+      if(!m.key || m.key.fromMe) return;
+      var pj=m.key.participant||m.key.participantAlt||"";
+      var num=jidNum(pj); if(!num) return;
+      mergeParticipant(jid, pj, num, (m.pushName||"").trim());
+    });
+    api("GET","/group/participants/"+encodeURIComponent(cfg.inst)+"?groupJid="+encodeURIComponent(jid))
+    .then(function(d){
+      var arr=(d&&d.participants)||(Array.isArray(d)?d:[])||[];
+      arr.forEach(function(p){ var pj=p.id||p.jid||p.participant||""; mergeParticipant(jid, pj, jidNum(pj), (p.name||p.pushName||p.notify||p.verifiedName||"").trim()); });
+    }).catch(function(){});
   }
 
   function hideMentionDropdown() {
@@ -3279,8 +3289,7 @@
       if (mentionIndex >= 0 && mentionIndex < currentMentions.length) {
         e.preventDefault();
         var u = currentMentions[mentionIndex];
-        var name = typeof u === "string" ? u : u.username;
-        insertMention(name);
+        insertMention(typeof u === "string" ? u : u.name);
       }
     } else if (e.key === "Escape") {
       e.preventDefault();
@@ -3299,7 +3308,7 @@
     } catch(e) {}
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
-    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.26)";
+    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.27)";
     $("inst-name").textContent=cfg.inst + " (" + cfg.user + ")";
     var ub=$("inst-user-badge");if(ub)ub.textContent=cfg.user;
     initDial();loadTasks();updateBadge();
