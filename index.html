@@ -707,7 +707,7 @@
       if(e.data && e.data.type==='open-chat' && e.data.jid){ try{ openChatByJid(e.data.jid); }catch(err){} }
     });
   }
-  console.log("Gateway UI Version: 1.25");
+  console.log("Gateway UI Version: 1.26");
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
   var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1", MCKEY="naqd_gw_msgcache_v1", RKEY="naqd_gw_read_ids_v1", NMKEY="naqd_gw_names_v1";
   var REFRESH_MS=15000;
@@ -923,6 +923,11 @@
   function saveNameCache(){ if(_nmSaveTimer)return; _nmSaveTimer=setTimeout(function(){_nmSaveTimer=null;try{lsSet(NMKEY,JSON.stringify(nameCache));}catch(e){}},2000); }
   function rememberName(num, name){ num=digits(num); if(!num||!isRealName(name))return; name=String(name).trim(); if(nameCache[num]!==name){nameCache[num]=name;saveNameCache();} }
   function nameOf(num){ num=digits(num); return num?(nameCache[num]||null):null; }
+  // Replace "@<number>" mentions (WhatsApp tags) with the contact's name when we know it
+  function resolveMentions(text){
+    if(!text || text.indexOf("@")<0) return text;
+    return text.replace(/@(\d{7,15})/g, function(full, num){ var nm=nameOf(num); return nm?("@"+nm):full; });
+  }
   function formatChatTime(time) {
     if (!time) return "";
     var now = new Date();
@@ -1948,10 +1953,14 @@
     var t=new Date(tsMs(m.messageTimestamp));
     var row=el("div","row "+(out?"out":"in")),b=el("div","bubble");
     if(grp&&!out){
-      var partNum=jidNum((m.key&&m.key.participant)||(m.key&&m.key.participantAlt)||"");
+      var _k=m.key||{}, _pAlt=_k.participantAlt||"", _p=_k.participant||"";
+      // participant is often a @lid (cryptic id); the real phone number is in participantAlt
+      var phoneNum=jidNum((_pAlt && _pAlt.indexOf("@lid")<0) ? _pAlt : ((_p && _p.indexOf("@lid")<0) ? _p : ""));
+      var lidNum=jidNum((_p && _p.indexOf("@lid")>-1) ? _p : ((_pAlt && _pAlt.indexOf("@lid")>-1) ? _pAlt : ""));
       var pn=(m.pushName||"").trim();
-      if(pn) rememberName(partNum, pn);
-      var au=el("div","b-author");au.textContent=pn||nameOf(partNum)||partNum;
+      if(pn){ if(phoneNum) rememberName(phoneNum, pn); if(lidNum) rememberName(lidNum, pn); }
+      var au=el("div","b-author");
+      au.textContent = pn || (phoneNum&&nameOf(phoneNum)) || (lidNum&&nameOf(lidNum)) || phoneNum || lidNum || "";
       if(au.textContent)b.appendChild(au);
     }
     var qEl=buildQuoteEl(m); if(qEl)b.appendChild(qEl);
@@ -1962,7 +1971,7 @@
         body.style.opacity="0.67";
         body.innerHTML='<span style="font-style:normal;margin-right:4px;">🚫</span> ' + esc(txt);
       } else {
-        body.textContent=txt||"[message]";
+        body.textContent=resolveMentions(txt)||"[message]";
         if(!txt){ console.log("Raw unrecognized message:", m); }
       }
       b.appendChild(body);
@@ -2051,7 +2060,7 @@
   }
   function renderMessages(recs,scroll){
     var jid=active.jid;
-    // Rebuild reaction index from raw records (reaction messages themselves are not displayed).
+    // Rebuild reaction index + pre-cache sender names (so @mentions resolve in this same pass).
     currentReactions={};
     (recs||[]).forEach(function(m){
       var rm=m&&m.message&&m.message.reactionMessage;
@@ -2060,6 +2069,13 @@
         currentReactions[tid]=currentReactions[tid]||{};
         var who=(m.key&&m.key.fromMe)?"__me__":((m.key&&m.key.participant)||"__them__");
         if(rm.text){currentReactions[tid][who]=rm.text;}else{delete currentReactions[tid][who];}
+      }
+      var k=m&&m.key, pn=(m&&m.pushName||"").trim();
+      if(k && !k.fromMe && pn){
+        var pAlt=k.participantAlt||"", p=k.participant||"";
+        var phone=(pAlt && pAlt.indexOf("@lid")<0)?pAlt:((p && p.indexOf("@lid")<0)?p:"");
+        if(phone) rememberName(jidNum(phone), pn);
+        if(p && p.indexOf("@lid")>-1) rememberName(jidNum(p), pn);
       }
     });
     var visibleRecs = (recs || []).filter(function(m){ return !isSystemOrInternalMessage(m); });
@@ -3283,7 +3299,7 @@
     } catch(e) {}
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
-    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.25)";
+    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.26)";
     $("inst-name").textContent=cfg.inst + " (" + cfg.user + ")";
     var ub=$("inst-user-badge");if(ub)ub.textContent=cfg.user;
     initDial();loadTasks();updateBadge();
