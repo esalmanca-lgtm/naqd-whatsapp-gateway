@@ -707,7 +707,7 @@
       if(e.data && e.data.type==='open-chat' && e.data.jid){ try{ openChatByJid(e.data.jid); }catch(err){} }
     });
   }
-  console.log("Gateway UI Version: 1.27");
+  console.log("Gateway UI Version: 1.28");
   var KEY="naqd_gw_cfg_v1", TKEY="naqd_gw_tasks_v1", THKEY="naqd_gw_theme", LKEY="naqd_gw_lids_v1";
   var UKEY="naqd_gw_users_v2", AKEY="naqd_gw_access_v1", CKEY="naqd_gw_categories_v2", CCKEY="naqd_gw_chat_categories_v1", FLKEY="naqd_gw_failed_lids_v1", MCKEY="naqd_gw_msgcache_v1", RKEY="naqd_gw_read_ids_v1", NMKEY="naqd_gw_names_v1";
   var REFRESH_MS=15000;
@@ -3302,13 +3302,14 @@
     cfg=c;if(!cfg.user)cfg.user="admin";lsSet(KEY,JSON.stringify(c));
     initKeys(cfg.inst);
     initMentionAutocomplete();
+    resyncPush();   // re-register push with the server in case it was lost (daemon restart)
     try {
       // Set base state — ensures first hardware back press stays in app
       history.replaceState({ activeJid: null }, '', '#');
     } catch(e) {}
     $("gate").classList.add("hidden");$("app").classList.remove("hidden");
     var h=cfg.url.replace(/^https?:\/\//,"");
-    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.27)";
+    $("host-label").textContent=h;$("foot-host").textContent="connected to "+h + " (v1.28)";
     $("inst-name").textContent=cfg.inst + " (" + cfg.user + ")";
     var ub=$("inst-user-badge");if(ub)ub.textContent=cfg.user;
     initDial();loadTasks();updateBadge();
@@ -3794,6 +3795,16 @@
     .then(function(d){ toast(d&&d.sent ? "Test sent to "+d.sent+" device(s)" : "No subscribed devices","ok"); })
     .catch(function(e){ toast("Test failed","err"); logLine("[Push] test: "+((e&&e.message)||e),"err"); })
     .then(function(){ if(b){b.disabled=false;b.textContent="Send test notification";} });
+  }
+  // Self-heal: if the browser is still subscribed but the server forgot it
+  // (e.g. daemon restart), re-register the existing subscription on app open.
+  function resyncPush(){
+    if(!pushSupported() || location.protocol!=="https:" || lsGet("naqd_gw_push_enabled")!=="1") return;
+    navigator.serviceWorker.ready.then(function(reg){ return reg.pushManager.getSubscription(); }).then(function(sub){
+      if(!sub) return;
+      fetch(pushBase()+"/api/subscribe",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({subscription:sub, user:(cfg&&cfg.user)||"", inst:(cfg&&cfg.inst)||""})}).catch(function(){});
+    }).catch(function(){});
   }
   function enablePush(){
     if(!pushSupported())return;

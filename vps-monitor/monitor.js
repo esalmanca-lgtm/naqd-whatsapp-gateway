@@ -22,7 +22,11 @@ if (VAPID_PUBLIC && VAPID_PRIVATE) {
   console.log('[Push] No VAPID keys set — web push disabled');
 }
 
-const STATE_FILE = path.join(__dirname, 'alert_state.json');
+// Persist into a mounted DIRECTORY (Docker mounts dirs cleanly) — avoids the
+// "mounted file becomes a directory" footgun that silently broke state saving.
+const STATE_DIR = process.env.STATE_DIR || path.join(__dirname, 'data');
+const STATE_FILE = path.join(STATE_DIR, 'alert_state.json');
+try { fs.mkdirSync(STATE_DIR, { recursive: true }); } catch (e) {}
 
 // Persistent settings config (loads from Env first, can be overridden by UI)
 let config = {
@@ -67,6 +71,7 @@ function loadState() {
 
 function saveState() {
   try {
+    try { fs.mkdirSync(STATE_DIR, { recursive: true }); } catch (e) {}
     const data = { alertedMsgIds, activeUnreplied, lateReplies, ownerJid, config, subscriptions, lastSeenMsg, pushSeeded };
     fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (e) {
