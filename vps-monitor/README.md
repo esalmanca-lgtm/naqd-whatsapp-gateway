@@ -43,11 +43,15 @@ Run this command to start the container in the background (mapping port `3000` t
 docker run -d \
   --name naqd-monitor \
   --restart always \
-  -p 3000:3000 \
-  -v $(pwd)/vps-monitor/alert_state.json:/app/alert_state.json \
+  -p 4000:3000 \
+  -v $(pwd)/vps-monitor/data:/app/data \
   --env-file vps-monitor/.env \
   naqd-monitor
 ```
+
+> **Important:** mount the `data` **directory** (`vps-monitor/data:/app/data`), NOT a
+> single file. Mounting a not-yet-existing file makes Docker create it as a *directory*,
+> which silently breaks state saving (subscriptions, alert history) with `EISDIR`.
 
 ### 5. Access the UI
 Open your browser and navigate to:
