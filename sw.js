@@ -1,4 +1,4 @@
-const CACHE_NAME = 'naqd-gateway-v12';
+const CACHE_NAME = 'naqd-gateway-v14';
 const ASSETS = [
   './',
   './index.html',
