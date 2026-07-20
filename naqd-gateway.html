@@ -948,8 +948,10 @@
 
   /* ---- response monitor helpers ---- */
   var alertedMsgIds = {};
+  var ignoredMsgIds = {};
   try {
     alertedMsgIds = JSON.parse(lsGet("naqd_gw_alerted_ids") || "{}");
+    ignoredMsgIds = JSON.parse(lsGet("naqd_gw_ignored_ids") || "{}");
   } catch(e) {}
 
   function cleanJidPhone(j) {
@@ -977,6 +979,7 @@
     var lm = c.lastMessage || (c._raw && c._raw.lastMessage);
     if (!lm || !lm.key) return false;
     if (lm.key.fromMe) return false;
+    if (ignoredMsgIds && ignoredMsgIds[lm.key.id]) return false;
     
     var sender = getSenderPhone(lm);
     var officeStr = lsGet("naqd_gw_alert_office") || "";
@@ -3025,20 +3028,31 @@
       allRecipients.sort(function(a, b) { return a.name.localeCompare(b.name); });
       
       if (alertTarget) {
-        var idx = -1;
-        for (var i=0; i<allRecipients.length; i++) {
-          if (allRecipients[i].jid === alertTarget) { idx = i; break; }
-        }
-        if (idx > -1) {
-          var targetItem = allRecipients.splice(idx, 1)[0];
-          allRecipients.unshift(targetItem);
-        } else {
-          allRecipients.unshift({ jid: alertTarget, name: "Target Alert Group/JID", isGroup: alertTarget.indexOf("@g.us") > -1 });
+        var targetJids = alertTarget.split(/[,;\n]+/).map(function(s){ return s.trim(); }).filter(Boolean);
+        var targetMap = {};
+        targetJids.forEach(function(t) { targetMap[t] = true; });
+        
+        if (targetJids.length > 0) {
+          var unshifted = [];
+          targetJids.forEach(function(t) {
+            var idx = -1;
+            for (var i=0; i<allRecipients.length; i++) {
+              if (allRecipients[i].jid === t || cleanJidPhone(allRecipients[i].jid) === cleanJidPhone(t)) { idx = i; break; }
+            }
+            if (idx > -1) {
+              var targetItem = allRecipients.splice(idx, 1)[0];
+              targetMap[targetItem.jid] = true;
+              unshifted.push(targetItem);
+            } else {
+              unshifted.push({ jid: t, name: t + (t.indexOf("@g.us") > -1 ? " (Group)" : " (Target)"), isGroup: t.indexOf("@g.us") > -1 });
+            }
+          });
+          allRecipients = unshifted.concat(allRecipients);
         }
       }
       
       allRecipients.forEach(function(r, idx) {
-        var isChecked = (r.jid === alertTarget) ? 'checked' : '';
+        var isChecked = (alertTarget && (alertTarget.indexOf(r.jid) > -1 || (cleanJidPhone(r.jid) && alertTarget.indexOf(cleanJidPhone(r.jid)) > -1))) ? 'checked' : '';
         html += '<label class="sr-recipient-row" data-name="' + esc(r.name.toLowerCase()) + '" style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px;cursor:pointer">';
         html += '<input type="checkbox" class="sr-recipient-cb" value="' + esc(r.jid) + '" ' + isChecked + '>';
         html += '<span>' + esc(r.name) + ' <span style="font-size:11px;color:var(--faint)">(' + (r.isGroup ? 'Group' : 'Chat') + ')</span></span></label>';
@@ -3271,13 +3285,21 @@
     fetch('/api/settings')
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        if (data && data.alert_target) {
+        if (data && data.alert_target !== undefined) {
           isVpsBackendActive = true;
           lsSet("naqd_gw_alert_enabled", (data.alert_enabled === true || data.alert_enabled === "true") ? "true" : "false");
           lsSet("naqd_gw_alert_target", data.alert_target);
           lsSet("naqd_gw_alert_office", data.alert_office);
           lsSet("naqd_gw_alert_timeout", data.alert_timeout);
           lsSet("naqd_gw_alert_format", data.alert_format);
+          if (data.alertedMsgIds && typeof data.alertedMsgIds === 'object') {
+            alertedMsgIds = Object.assign({}, alertedMsgIds, data.alertedMsgIds);
+            lsSet("naqd_gw_alerted_ids", JSON.stringify(alertedMsgIds));
+          }
+          if (data.ignoredMsgIds && typeof data.ignoredMsgIds === 'object') {
+            ignoredMsgIds = Object.assign({}, ignoredMsgIds, data.ignoredMsgIds);
+            lsSet("naqd_gw_ignored_ids", JSON.stringify(ignoredMsgIds));
+          }
         }
         cb();
       })
@@ -3313,8 +3335,8 @@
       
       html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;cursor:pointer">';
       html += '<input type="checkbox" id="alert-enabled" ' + (alertEnabled ? 'checked' : '') + '> Enable response alerts</label>';
-      html += '<div class="field" style="margin-bottom:8px"><label>Intimation JID / Phone Number</label>';
-      html += '<input id="alert-target" class="input" placeholder="e.g. 120363411366521608@g.us" value="' + esc(alertTarget) + '"></div>';
+      html += '<div class="field" style="margin-bottom:8px"><label>Intimation JID / Phone Number (comma-separated)</label>';
+      html += '<textarea id="alert-target" class="input" rows="2" style="padding:7px 10px;font-size:13px;height:auto" placeholder="e.g. 120363411366521608@g.us, 918848159581">' + esc(alertTarget) + '</textarea></div>';
       html += '<div class="field" style="margin-bottom:8px"><label>Office Numbers (comma-separated)</label>';
       html += '<textarea id="alert-office" class="input" rows="2" style="padding:7px 10px;font-size:13px;height:auto" placeholder="e.g. 918848159581,919380525080">' + esc(alertOffice) + '</textarea></div>';
       html += '<div class="field" style="margin-bottom:8px"><label>Timeout (minutes)</label>';
@@ -3569,9 +3591,19 @@
       ignoreBtn.style.height = "26px";
       ignoreBtn.textContent = "Ignore";
       ignoreBtn.onclick = function() {
-        if (lm) {
+        if (lm && lm.key && lm.key.id) {
           alertedMsgIds[lm.key.id] = true;
+          ignoredMsgIds[lm.key.id] = true;
           lsSet("naqd_gw_alerted_ids", JSON.stringify(alertedMsgIds));
+          lsSet("naqd_gw_ignored_ids", JSON.stringify(ignoredMsgIds));
+          if (location.protocol !== 'file:') {
+            fetch('/api/ignore', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ msgId: lm.key.id })
+            }).catch(function(){});
+          }
+          updateSidebarUnrepliedBadge();
           renderUnrepliedView();
           toast("Chat ignored from alerter", "ok");
         }

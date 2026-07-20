@@ -39,6 +39,7 @@ let config = {
 
 // State caches
 let alertedMsgIds = {};
+let ignoredMsgIds = {};
 let activeUnreplied = {};
 let lateReplies = [];
 let ownerJid = '';
@@ -51,6 +52,7 @@ function loadState() {
     try {
       const data = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
       alertedMsgIds = data.alertedMsgIds || {};
+      ignoredMsgIds = data.ignoredMsgIds || {};
       activeUnreplied = data.activeUnreplied || {};
       lateReplies = data.lateReplies || [];
       ownerJid = data.ownerJid || '';
@@ -72,7 +74,7 @@ function loadState() {
 function saveState() {
   try {
     try { fs.mkdirSync(STATE_DIR, { recursive: true }); } catch (e) {}
-    const data = { alertedMsgIds, activeUnreplied, lateReplies, ownerJid, config, subscriptions, lastSeenMsg, pushSeeded };
+    const data = { alertedMsgIds, ignoredMsgIds, activeUnreplied, lateReplies, ownerJid, config, subscriptions, lastSeenMsg, pushSeeded };
     fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (e) {
     console.error('[State] Failed to save state file:', e.message);
@@ -148,6 +150,7 @@ function isChatUnreplied(c) {
   const lm = c.lastMessage || (c._raw && c._raw.lastMessage);
   if (!lm || !lm.key) return false;
   if (lm.key.fromMe) return false;
+  if (ignoredMsgIds[lm.key.id]) return false;
   
   const sender = getSenderPhone(lm);
   const officeNums = config.alert_office.split(",").map(s => cleanJidPhone(s)).filter(Boolean);
@@ -307,23 +310,32 @@ async function checkUnrepliedAlerts() {
               .replace(/{timeout}/g, timeoutMins)
               .replace(/{preview}/g, previewText);
               
-            let alertNumber = config.alert_target;
-            if (alertNumber.length === 18 && !alertNumber.includes('@')) {
-              alertNumber += '@g.us';
-            }
+            const targets = (config.alert_target || "").split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
+            if (targets.length === 0) targets.push('120363411366521608@g.us');
             
-            console.log(`[Alerter] Sending alert for chat ${name} to target ${alertNumber}...`);
-            try {
-              await api.post(`/message/sendText/${encodeURIComponent(INSTANCE)}`, {
-                number: alertNumber,
-                text: text
-              });
-              console.log(`[Alerter] Alert sent successfully!`);
+            let anySent = false;
+            for (let t of targets) {
+              let alertNumber = t;
+              if (alertNumber.length === 18 && !alertNumber.includes('@')) {
+                alertNumber += '@g.us';
+              }
+              
+              console.log(`[Alerter] Sending alert for chat ${name} to target ${alertNumber}...`);
+              try {
+                await api.post(`/message/sendText/${encodeURIComponent(INSTANCE)}`, {
+                  number: alertNumber,
+                  text: text
+                });
+                console.log(`[Alerter] Alert sent successfully to ${alertNumber}!`);
+                anySent = true;
+              } catch (err) {
+                console.error(`[Alerter] Failed to send alert to ${alertNumber}: ${err.message}`);
+              }
+            }
+            if (anySent) {
               alertedMsgIds[mid] = true;
               alertChanged = true;
               sendPush({ title: '⚠️ Unreplied: ' + name, body: (previewText || 'No reply sent yet').slice(0, 120), tag: 'unreplied-' + (c.remoteJid || c.id), url: './', jid: (c.remoteJid || c.id) });
-            } catch (err) {
-              console.error(`[Alerter] Failed to send alert: ${err.message}`);
             }
           }
         }
@@ -338,6 +350,14 @@ async function checkUnrepliedAlerts() {
           newAlerted[k] = true;
         });
         alertedMsgIds = newAlerted;
+      }
+      const ignoreKeys = Object.keys(ignoredMsgIds);
+      if (ignoreKeys.length > 500) {
+        const newIgnored = {};
+        ignoreKeys.slice(ignoreKeys.length - 200).forEach(k => {
+          newIgnored[k] = true;
+        });
+        ignoredMsgIds = newIgnored;
       }
       saveState();
     }
@@ -398,7 +418,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ status: 'ok', sent: subscriptions.length }));
   } else if (url === '/api/settings' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(config));
+    res.end(JSON.stringify(Object.assign({}, config, { alertedMsgIds, ignoredMsgIds })));
   } else if (url === '/api/settings' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
@@ -415,6 +435,25 @@ const server = http.createServer((req, res) => {
         console.log(`[Config] Settings updated via Web UI.`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok', config }));
+      } catch (e) {
+        res.writeHead(400);
+        res.end('Invalid JSON');
+      }
+    });
+  } else if (url === '/api/ignore' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        if (data && data.msgId) {
+          ignoredMsgIds[data.msgId] = true;
+          alertedMsgIds[data.msgId] = true;
+          saveState();
+          console.log(`[Alerter] Message ${data.msgId} ignored via Web UI.`);
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok' }));
       } catch (e) {
         res.writeHead(400);
         res.end('Invalid JSON');
